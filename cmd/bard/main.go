@@ -37,7 +37,7 @@ func run(args []string) error {
 	case "scan":
 		return notImplemented("scan", 4)
 	case "user":
-		return notImplemented("user", 2)
+		return cmdUser(args[1:])
 	case "export":
 		return notImplemented("export", 12)
 	case "version":
@@ -58,7 +58,8 @@ func usage() {
 Usage:
   bard serve [--config PATH]   Run the server
   bard scan                    Scan configured sources
-  bard user                    Manage accounts
+  bard user add|passwd|pin|list
+                               Manage accounts
   bard export                  Export database and caches
   bard version                 Print the version
 

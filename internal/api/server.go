@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/not-emily/bardbookserver/internal/auth"
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
 )
@@ -18,17 +19,38 @@ const shutdownGrace = 15 * time.Second
 type Server struct {
 	cfg     *config.Config
 	db      *db.DB
+	store   *auth.Store
 	logger  *slog.Logger
 	version string
+
+	loginLimiter *auth.Limiter
+	pinLimiter   *auth.Limiter
 }
 
 func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version string) *Server {
-	return &Server{cfg: cfg, db: database, logger: logger, version: version}
+	return &Server{
+		cfg:          cfg,
+		db:           database,
+		store:        auth.NewStore(database.DB),
+		logger:       logger,
+		version:      version,
+		loginLimiter: auth.NewLimiter(loginAttempts, loginWindow),
+		pinLimiter:   auth.NewLimiter(pinAttempts, pinWindow),
+	}
 }
 
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+
+	authed := http.NewServeMux()
+	authed.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	authed.HandleFunc("GET /api/v1/auth/me", s.handleMe)
+	authed.HandleFunc("POST /api/v1/auth/switch", s.handleSwitchProfile)
+	authed.HandleFunc("GET /api/v1/devices", s.handleListDevices)
+	authed.HandleFunc("DELETE /api/v1/devices/{id}", s.handleRevokeDevice)
+	mux.Handle("/api/v1/", s.requireAuth(authed))
 
 	resolver := proxyResolver{trusted: s.cfg.TrustedPrefixes()}
 
