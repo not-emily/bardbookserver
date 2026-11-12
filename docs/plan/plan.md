@@ -389,7 +389,7 @@ Phases 2, 4, and 7 are the largest and carry sub-phases in their files.
 
 | Category | Choice | Notes |
 |----------|--------|-------|
-| Language | Go (pin current stable in `go.mod`) | Single static binary; no cgo anywhere |
+| Language | Go 1.27 | Single static binary; no cgo anywhere |
 | HTTP | stdlib `net/http` + `http.ServeMux` | Go 1.22+ method and wildcard routing is sufficient; no router dep |
 | Database | SQLite via `modernc.org/sqlite` | Pure Go, FTS5 available. See Decision 1 |
 | Migrations | Embedded `.sql` files + version table | Hand-rolled, ~60 lines; avoids a migration framework |
@@ -407,7 +407,7 @@ Phases 2, 4, and 7 are the largest and carry sub-phases in their files.
 | Admin UI | Go templates + vendored htmx | No Node, no build step, embedded via `embed` |
 | TLS | `golang.org/x/crypto/acme/autocert` (optional) | Only for the direct port-forward case |
 | Release | goreleaser + GitHub Actions | linux amd64/arm64, systemd unit, Docker image |
-| Default port | **2273** | "BARD" on a phone keypad. Registered range, clear of ephemeral, no known collision with common self-hosted services — verify against the IANA registry before locking it in |
+| Default port | **2273** | "BARD" on a phone keypad. Registered range, clear of ephemeral, no collision with common self-hosted services. IANA lists it as `mysql-im` (MySQL Instance Manager, 2004), a tool removed from MySQL in 2010 — accepted, since the port is configurable |
 
 ## Future Considerations
 
@@ -427,7 +427,6 @@ Deferred but architecturally supported:
 
 Flagged rather than guessed; cheap to change.
 
-- Module path is `github.com/OWNER/bardbookserver` pending the actual GitHub owner
 - Sidecar filename is `bard.json`, one per edition directory
 - Default on-disk layout convention for the naming fallback is `Author/Series/## - Title/`
 - Age-restricted accounts are created by an admin setting `birth_date` and `restricted`; there is no self-service signup

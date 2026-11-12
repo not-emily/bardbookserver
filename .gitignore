@@ -1,0 +1,8 @@
+/bard
+/dist/
+/bard-data/
+bard.yml
+*.db
+*.db-wal
+*.db-shm
+/.dev/

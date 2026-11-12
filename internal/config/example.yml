@@ -1,0 +1,40 @@
+# Bard server configuration. Every value shown is the default; a missing
+# config file is fine and leaves all of these in effect.
+
+# Where Bard keeps its database and cover cache. Not your books -- those are
+# configured as sources in the admin UI.
+data_dir: ~/.local/share/bard
+
+bind_addr: 0.0.0.0
+port: 2273
+
+# Addresses or CIDRs of proxies permitted to set X-Forwarded-For and
+# X-Forwarded-Proto. Leave empty unless something sits in front of Bard.
+#
+# Getting this wrong fails silently in both directions. Too permissive lets a
+# caller spoof its address and slip past login rate limiting; too restrictive
+# behind a tunnel collapses every client into one 127.0.0.1 bucket, so one
+# family member's failed logins throttle everyone.
+#
+# Cloudflare Tunnel or a reverse proxy on this machine:
+#   trusted_proxies: ["127.0.0.1/32", "::1/128"]
+trusted_proxies: []
+
+# Background workers for scanning and metadata. This is the throttle that
+# keeps Bard from starving anything else on the box. Scans are resumable, so
+# a low value costs wall-clock time and nothing else.
+workers: 2
+
+log_level: info
+
+# off   -- plain HTTP. Correct behind Cloudflare Tunnel or a reverse proxy,
+#          which terminate TLS themselves.
+# auto  -- Bard obtains its own certificates. Only for a directly exposed
+#          port with a public DNS name; ACME cannot complete behind a tunnel.
+# files -- supply your own certificate and key.
+tls:
+  # Quoted deliberately: YAML resolves a bare off to a boolean.
+  mode: "off"
+  # domains: ["books.example.com"]
+  # cert_file: /etc/bard/tls/fullchain.pem
+  # key_file: /etc/bard/tls/privkey.pem

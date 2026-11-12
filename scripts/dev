@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Local dev server control. State lives in .dev/ and is gitignored.
+#
+# Tracks the server by PID file rather than pgrep: a pattern like "bard serve"
+# also matches the shell running this script, which makes pgrep-based stops
+# capable of killing their own caller.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+ROOT=$PWD
+
+DEV_DIR=$ROOT/.dev
+BIN=$DEV_DIR/bard
+PIDFILE=$DEV_DIR/bard.pid
+LOGFILE=$DEV_DIR/bard.log
+CONFIG=$DEV_DIR/bard.yml
+DATA_DIR=$DEV_DIR/data
+
+PORT=${BARD_DEV_PORT:-42731}
+TRUSTED_PROXIES=${BARD_DEV_TRUSTED_PROXIES:-'["127.0.0.1/32", "::1/128"]'}
+STOP_TIMEOUT=${BARD_DEV_STOP_TIMEOUT:-10}
+
+die() { echo "dev: $*" >&2; exit 1; }
+
+# Confirms the PID is actually our server before signalling it, so a reused
+# PID cannot send us after an unrelated process.
+running_pid() {
+	[[ -f $PIDFILE ]] || return 1
+	local pid
+	pid=$(<"$PIDFILE")
+	[[ $pid =~ ^[0-9]+$ ]] || return 1
+	kill -0 "$pid" 2>/dev/null || return 1
+	[[ -r /proc/$pid/comm && $(<"/proc/$pid/comm") == bard ]] || return 1
+	echo "$pid"
+}
+
+write_config() {
+	mkdir -p "$DEV_DIR"
+	cat > "$CONFIG" <<-YAML
+		data_dir: $DATA_DIR
+		bind_addr: 127.0.0.1
+		port: $PORT
+		trusted_proxies: $TRUSTED_PROXIES
+		workers: 2
+		log_level: debug
+		tls:
+		  mode: "off"
+	YAML
+}
+
+cmd_build() {
+	mkdir -p "$DEV_DIR"
+	CGO_ENABLED=0 go build -o "$BIN" ./cmd/bard
+	echo "built $BIN"
+}
+
+cmd_start() {
+	if pid=$(running_pid); then
+		echo "already running (pid $pid, port $PORT)"
+		return 0
+	fi
+	rm -f "$PIDFILE"
+
+	cmd_build
+	write_config
+
+	"$BIN" serve --config "$CONFIG" >> "$LOGFILE" 2>&1 &
+	local pid=$!
+	echo "$pid" > "$PIDFILE"
+
+	for _ in $(seq 20); do
+		if ! kill -0 "$pid" 2>/dev/null; then
+			rm -f "$PIDFILE"
+			echo "failed to start; last lines of $LOGFILE:" >&2
+			tail -5 "$LOGFILE" >&2
+			return 1
+		fi
+		if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/healthz" 2>/dev/null; then
+			echo "started (pid $pid) on http://127.0.0.1:$PORT"
+			return 0
+		fi
+		sleep 0.25
+	done
+
+	echo "started (pid $pid) but /healthz did not answer; see $LOGFILE" >&2
+	return 1
+}
+
+cmd_stop() {
+	local pid
+	if ! pid=$(running_pid); then
+		rm -f "$PIDFILE"
+		echo "not running"
+		return 0
+	fi
+
+	kill -TERM "$pid"
+	for _ in $(seq "$((STOP_TIMEOUT * 4))"); do
+		if ! kill -0 "$pid" 2>/dev/null; then
+			rm -f "$PIDFILE"
+			echo "stopped (pid $pid)"
+			return 0
+		fi
+		sleep 0.25
+	done
+
+	echo "pid $pid ignored SIGTERM after ${STOP_TIMEOUT}s; sending SIGKILL" >&2
+	kill -KILL "$pid" 2>/dev/null || true
+	rm -f "$PIDFILE"
+	return 1
+}
+
+cmd_restart() {
+	cmd_stop
+	cmd_start
+}
+
+cmd_status() {
+	local pid
+	if pid=$(running_pid); then
+		echo "running (pid $pid, port $PORT)"
+		curl -fsS "http://127.0.0.1:$PORT/healthz" && echo
+	else
+		echo "not running"
+		return 1
+	fi
+}
+
+cmd_logs() {
+	[[ -f $LOGFILE ]] || die "no log at $LOGFILE"
+	tail "${1:--n50}" "$LOGFILE"
+}
+
+# Wipes the dev database so the next start exercises first-run migrations.
+cmd_reset() {
+	if pid=$(running_pid); then
+		die "stop the server first (pid $pid)"
+	fi
+	rm -rf "$DATA_DIR" "$LOGFILE"
+	echo "removed $DATA_DIR and $LOGFILE"
+}
+
+case ${1:-} in
+	build)   cmd_build ;;
+	start)   cmd_start ;;
+	stop)    cmd_stop ;;
+	restart) cmd_restart ;;
+	status)  cmd_status ;;
+	logs)    shift; cmd_logs "$@" ;;
+	reset)   cmd_reset ;;
+	*)
+		cat >&2 <<-USAGE
+			usage: scripts/dev <command>
+
+			  build     compile to .dev/bard
+			  start     build, then start and wait for /healthz
+			  stop      SIGTERM, wait, SIGKILL as a last resort
+			  restart   stop then start
+			  status    report pid and /healthz
+			  logs      tail .dev/bard.log (accepts tail flags)
+			  reset     delete the dev database and log
+
+			env: BARD_DEV_PORT (default 42731),
+			     BARD_DEV_TRUSTED_PROXIES, BARD_DEV_STOP_TIMEOUT
+		USAGE
+		exit 1 ;;
+esac
