@@ -93,11 +93,12 @@ Never rename or move a file in this phase or any other. Filing uploads into the 
       when page one carries an embedded image, since pure Go cannot rasterise
 - [x] A second scan with no filesystem changes performs no writes
 - [x] Touching one file's mtime rescans that file alone
-- [ ] Sidecars are written when the source allows and absent when it does not
-- [ ] A read-only source scans without error
+- [x] Sidecars are written when the source allows and absent when it does not
+- [x] A read-only source scans without error
+      — one warning for the whole scan, not one per directory, and the index is
+      still fully populated
 - [ ] Killing the process mid-scan and restarting resumes without duplicate rows
       — partially covered: a requeue after a crash and a repeated scan are both
       tested, but no test actually kills the process
-- [ ] A file with no embedded metadata gets title and author from its path
-      — title only; author needs 4.4's convention parsing
+- [x] A file with no embedded metadata gets title and author from its path
 - [x] No file is renamed or moved during any scan

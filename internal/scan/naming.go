@@ -57,7 +57,10 @@ func matchKey(title string) string {
 }
 
 // pathMetadata is the lowest-precedence source: what the layout alone reveals.
-// v1 phase 4.4 replaces this with the full Author/Series/## - Title convention.
-func pathMetadata(c Candidate) metadata.Metadata {
-	return metadata.Metadata{Title: provisionalTitle(c)}
+func pathMetadata(root string, c Candidate) metadata.Metadata {
+	md := parsePath(root, c)
+	if md.Title == "" {
+		md.Title = provisionalTitle(c)
+	}
+	return md
 }

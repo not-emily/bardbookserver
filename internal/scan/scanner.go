@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/not-emily/bardbookserver/internal/jobs"
 	"github.com/not-emily/bardbookserver/internal/media"
 	"github.com/not-emily/bardbookserver/internal/metadata"
 	"github.com/not-emily/bardbookserver/internal/metadata/embedded"
+	"github.com/not-emily/bardbookserver/internal/metadata/sidecar"
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
@@ -61,7 +63,8 @@ func (s *Scanner) handleScanSource(ctx context.Context, j *jobs.Job) error {
 		"editions_added", res.EditionsAdded, "editions_removed", res.EditionsRemoved,
 		"files_added", res.FilesAdded, "files_updated", res.FilesUpdated,
 		"files_removed", res.FilesRemoved, "metadata_applied", res.MetadataApplied,
-		"covers_stored", res.CoversStored, "warnings", len(res.Warnings))
+		"covers_stored", res.CoversStored, "sidecars_written", res.SidecarsWritten,
+		"warnings", len(res.Warnings))
 	return nil
 }
 
@@ -80,6 +83,7 @@ type Result struct {
 	FilesRemoved    int
 	MetadataApplied int
 	CoversStored    int
+	SidecarsWritten int
 
 	Warnings []error
 }
@@ -129,6 +133,7 @@ func (s *Scanner) ScanSource(ctx context.Context, sourceID int64) (*Result, erro
 	if err := s.sweep(ctx, state, res); err != nil {
 		return nil, err
 	}
+	s.flushSidecars(src, state, res)
 
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE sources SET last_scan_finished_at = datetime('now') WHERE id = ?`, src.ID); err != nil {
@@ -149,6 +154,72 @@ type existingFile struct {
 type sourceState struct {
 	files    map[string]*existingFile
 	editions map[int64]model.Format
+
+	// Sidecars are per directory but editions are per candidate, so each
+	// directory's file is read once, amended by every candidate in it, and
+	// written back once at the end.
+	sidecars    map[string]*sidecar.File
+	sidecarDirs []string
+	seenKeys    map[string]map[string]bool
+}
+
+// sidecarFor reads a directory's bard.json once. A missing or unreadable one
+// yields an empty record: a hand-edited file with a stray comma must not fail
+// the scan.
+func (s *Scanner) sidecarFor(state *sourceState, dir string, res *Result) *sidecar.File {
+	if file, ok := state.sidecars[dir]; ok {
+		return file
+	}
+
+	file, err := sidecar.Read(dir)
+	if err != nil {
+		res.Warnings = append(res.Warnings, err)
+		file = &sidecar.File{Version: sidecar.Version, Editions: map[string]sidecar.Edition{}}
+	}
+
+	state.sidecars[dir] = file
+	state.sidecarDirs = append(state.sidecarDirs, dir)
+	return file
+}
+
+// entryKey names an edition within its directory.
+func entryKey(c Candidate) string {
+	if len(c.Files) == 1 {
+		return filepath.Base(c.Files[0].Path)
+	}
+	return sidecar.DirKey
+}
+
+// flushSidecars writes each touched directory's record, when the source allows
+// it. The first failure ends the attempt for the whole scan: a read-only
+// source must degrade to keeping everything in SQLite, with one warning rather
+// than one per directory.
+func (s *Scanner) flushSidecars(src *model.Source, state *sourceState, res *Result) {
+	if !src.WriteSidecars {
+		return
+	}
+
+	for _, dir := range state.sidecarDirs {
+		file := state.sidecars[dir]
+		for key := range file.Editions {
+			if !state.seenKeys[dir][key] {
+				delete(file.Editions, key)
+			}
+		}
+		if file.Empty() {
+			continue
+		}
+
+		wrote, err := file.Write(dir)
+		if err != nil {
+			res.Warnings = append(res.Warnings,
+				fmt.Errorf("sidecars skipped for the rest of this scan: %w", err))
+			return
+		}
+		if wrote {
+			res.SidecarsWritten++
+		}
+	}
 }
 
 func (s *Scanner) loadState(ctx context.Context, sourceID int64) (*sourceState, error) {
@@ -161,7 +232,12 @@ func (s *Scanner) loadState(ctx context.Context, sourceID int64) (*sourceState, 
 	}
 	defer rows.Close()
 
-	state := &sourceState{files: map[string]*existingFile{}, editions: map[int64]model.Format{}}
+	state := &sourceState{
+		files:    map[string]*existingFile{},
+		editions: map[int64]model.Format{},
+		sidecars: map[string]*sidecar.File{},
+		seenKeys: map[string]map[string]bool{},
+	}
 	for rows.Next() {
 		var (
 			f      existingFile
@@ -210,6 +286,14 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 	// unchanged tree free.
 	changed := editionID == 0 || filesChanged(c, editionID, state)
 
+	key := entryKey(c)
+	record := s.sidecarFor(state, c.Dir, res)
+	entry := record.Editions[key]
+	if state.seenKeys[c.Dir] == nil {
+		state.seenKeys[c.Dir] = map[string]bool{}
+	}
+	state.seenKeys[c.Dir][key] = true
+
 	var (
 		parsed embedded.Result
 		md     metadata.Metadata
@@ -219,9 +303,16 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 		if parsed, err = embedded.Parse(c.Format, c.paths()); err != nil {
 			res.Warnings = append(res.Warnings, err)
 		}
-		// Precedence, highest first. Phase 8 inserts providers after the
-		// sidecar that 4.4 adds at the front.
-		md = metadata.Resolve(parsed.Metadata, pathMetadata(c))
+		// Precedence, highest first: a hand correction, then what the file
+		// says, then what its path implies, and last whatever the sidecar
+		// remembers that nothing here could re-derive. Phase 8 inserts
+		// providers between the locked fields and the embedded parsers.
+		md = metadata.Resolve(
+			entry.LockedMetadata(),
+			parsed.Metadata,
+			pathMetadata(src.Path, c),
+			entry.Metadata(),
+		)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -246,9 +337,11 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 	}
 
 	if changed {
-		if err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations, res); err != nil {
+		locks, err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations, res)
+		if err != nil {
 			return err
 		}
+		record.Editions[key] = sidecar.FromMetadata(md, locks)
 	}
 
 	return tx.Commit()

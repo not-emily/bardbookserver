@@ -17,13 +17,14 @@ type editionRef struct {
 }
 
 // applyMetadata writes resolved metadata onto the book and its edition,
-// leaving any field a hand correction has locked alone.
+// leaving any field a hand correction has locked alone. It returns the locks it
+// honoured, which the sidecar records alongside the values.
 func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
-	md metadata.Metadata, durations []*float64, res *Result) error {
+	md metadata.Metadata, durations []*float64, res *Result) (model.FieldSet, error) {
 
 	bookLocks, editionLocks, err := loadLocks(ctx, tx, ref)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	book := &updates{}
@@ -41,7 +42,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
 	if md.Series != "" && !bookLocks.Has(model.FieldSeries) {
 		seriesID, err := upsertSeries(ctx, tx, md.Series)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		book.set("series_id", seriesID)
 		if md.SeriesPosition != nil {
@@ -51,7 +52,7 @@ func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
 	if !book.empty() {
 		book.set("updated_at", sqlNow)
 		if err := book.exec(ctx, tx, "books", ref.book); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
@@ -94,31 +95,31 @@ func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
 	if !edition.empty() {
 		edition.set("updated_at", sqlNow)
 		if err := edition.exec(ctx, tx, "editions", ref.edition); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
 	// Authorship belongs to the book, narration to this edition alone.
 	if len(md.Authors) > 0 && !bookLocks.Has(model.FieldAuthors) {
 		if err := replaceContributions(ctx, tx, "book_id", ref.book, model.RoleAuthor, md.Authors); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if len(md.Narrators) > 0 && !editionLocks.Has(model.FieldNarrators) {
 		if err := replaceContributions(ctx, tx, "edition_id", ref.edition, model.RoleNarrator, md.Narrators); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
 	if err := replaceChapters(ctx, tx, ref.edition, md.Chapters); err != nil {
-		return err
+		return 0, err
 	}
 	if err := setFileDurations(ctx, tx, ref.edition, durations); err != nil {
-		return err
+		return 0, err
 	}
 
 	res.MetadataApplied++
-	return nil
+	return bookLocks | editionLocks, nil
 }
 
 // sqlNow marks a column that takes SQLite's clock rather than a bind value.
