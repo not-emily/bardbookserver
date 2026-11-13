@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/not-emily/bardbookserver/internal/metadata"
 )
 
 // Titles here are provisional: v1 phase 4.3 overwrites them from embedded
@@ -52,4 +54,10 @@ func matchKey(title string) string {
 		}
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// pathMetadata is the lowest-precedence source: what the layout alone reveals.
+// v1 phase 4.4 replaces this with the full Author/Series/## - Title convention.
+func pathMetadata(c Candidate) metadata.Metadata {
+	return metadata.Metadata{Title: provisionalTitle(c)}
 }

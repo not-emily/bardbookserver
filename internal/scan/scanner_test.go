@@ -14,6 +14,7 @@ import (
 
 	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/jobs"
+	"github.com/not-emily/bardbookserver/internal/media"
 )
 
 func testDB(t *testing.T) *db.DB {
@@ -33,7 +34,7 @@ func testScanner(t *testing.T, root string) (*Scanner, *db.DB, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewScanner(d.DB, slog.New(slog.NewTextHandler(io.Discard, nil))), d, src.ID
+	return NewScanner(d.DB, media.NewCache(t.TempDir()), slog.New(slog.NewTextHandler(io.Discard, nil))), d, src.ID
 }
 
 func mustScan(t *testing.T, s *Scanner, sourceID int64) *Result {

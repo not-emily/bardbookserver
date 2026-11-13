@@ -335,3 +335,12 @@ func lower(c byte) byte {
 	}
 	return c
 }
+
+// paths lists a candidate's files in order, which is the shape the parsers want.
+func (c Candidate) paths() []string {
+	out := make([]string, len(c.Files))
+	for i, f := range c.Files {
+		out[i] = f.Path
+	}
+	return out
+}

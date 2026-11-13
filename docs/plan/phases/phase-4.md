@@ -85,9 +85,12 @@ Never rename or move a file in this phase or any other. Filing uploads into the 
 
 - [x] Scanning a fixture tree produces the expected sources, editions, and files
 - [x] A folder of MP3s becomes one edition with correctly ordered parts, not N editions
-- [ ] M4B chapters are extracted with correct titles and offsets
-- [ ] EPUB 2 (`toc.ncx`) and EPUB 3 (`nav.xhtml`) both yield chapters
+- [x] M4B chapters are extracted with correct titles and offsets
+      — cross-checked against ffprobe on two real audiobooks, 47 and 35 chapters
+- [x] EPUB 2 (`toc.ncx`) and EPUB 3 (`nav.xhtml`) both yield chapters
 - [ ] Covers are extracted for all four formats and cached
+      — EPUB, M4B and MP3 verified against real files; a PDF yields one only
+      when page one carries an embedded image, since pure Go cannot rasterise
 - [x] A second scan with no filesystem changes performs no writes
 - [x] Touching one file's mtime rescans that file alone
 - [ ] Sidecars are written when the source allows and absent when it does not
@@ -96,5 +99,5 @@ Never rename or move a file in this phase or any other. Filing uploads into the 
       — partially covered: a requeue after a crash and a repeated scan are both
       tested, but no test actually kills the process
 - [ ] A file with no embedded metadata gets title and author from its path
-      — title only, provisionally, from the filename or folder name
+      — title only; author needs 4.4's convention parsing
 - [x] No file is renamed or moved during any scan

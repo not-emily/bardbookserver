@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/not-emily/bardbookserver/internal/jobs"
+	"github.com/not-emily/bardbookserver/internal/media"
+	"github.com/not-emily/bardbookserver/internal/metadata"
+	"github.com/not-emily/bardbookserver/internal/metadata/embedded"
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
@@ -21,11 +24,12 @@ type SourcePayload struct {
 // file takes its row with it, and nothing here renames or moves anything.
 type Scanner struct {
 	db     *sql.DB
+	covers *media.Cache
 	logger *slog.Logger
 }
 
-func NewScanner(db *sql.DB, logger *slog.Logger) *Scanner {
-	return &Scanner{db: db, logger: logger}
+func NewScanner(db *sql.DB, covers *media.Cache, logger *slog.Logger) *Scanner {
+	return &Scanner{db: db, covers: covers, logger: logger}
 }
 
 func (s *Scanner) Register(p *jobs.Pool) {
@@ -56,7 +60,8 @@ func (s *Scanner) handleScanSource(ctx context.Context, j *jobs.Job) error {
 		"candidates", res.Candidates, "unchanged", res.Unchanged,
 		"editions_added", res.EditionsAdded, "editions_removed", res.EditionsRemoved,
 		"files_added", res.FilesAdded, "files_updated", res.FilesUpdated,
-		"files_removed", res.FilesRemoved, "warnings", len(res.Warnings))
+		"files_removed", res.FilesRemoved, "metadata_applied", res.MetadataApplied,
+		"covers_stored", res.CoversStored, "warnings", len(res.Warnings))
 	return nil
 }
 
@@ -73,6 +78,8 @@ type Result struct {
 	FilesAdded      int
 	FilesUpdated    int
 	FilesRemoved    int
+	MetadataApplied int
+	CoversStored    int
 
 	Warnings []error
 }
@@ -196,21 +203,83 @@ func (s *Scanner) loadState(ctx context.Context, sourceID int64) (*sourceState, 
 }
 
 func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate, state *sourceState, res *Result) error {
+	editionID := matchEdition(c, state)
+
+	// Parsing is the expensive half of a scan, so it happens only for a new
+	// edition or one whose bytes moved. This is what keeps a rescan of an
+	// unchanged tree free.
+	changed := editionID == 0 || filesChanged(c, editionID, state)
+
+	var (
+		parsed embedded.Result
+		md     metadata.Metadata
+	)
+	if changed {
+		var err error
+		if parsed, err = embedded.Parse(c.Format, c.paths()); err != nil {
+			res.Warnings = append(res.Warnings, err)
+		}
+		// Precedence, highest first. Phase 8 inserts providers after the
+		// sidecar that 4.4 adds at the front.
+		md = metadata.Resolve(parsed.Metadata, pathMetadata(c))
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin reconcile: %w", err)
 	}
 	defer tx.Rollback()
 
-	editionID := matchEdition(c, state)
+	ref := editionRef{edition: editionID}
 	if editionID == 0 {
-		editionID, err = createEdition(ctx, tx, src, c)
-		if err != nil {
+		if ref, err = createEdition(ctx, tx, src, c, md); err != nil {
 			return err
 		}
-		state.editions[editionID] = c.Format
+		state.editions[ref.edition] = c.Format
 		res.EditionsAdded++
+	} else if ref.book, err = bookOf(ctx, tx, editionID); err != nil {
+		return err
 	}
+
+	if err := s.upsertFiles(ctx, tx, c, ref.edition, state, res); err != nil {
+		return err
+	}
+
+	if changed {
+		if err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations, res); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// filesChanged reports whether the candidate differs from what is indexed for
+// this edition, in content, ordering, or membership.
+func filesChanged(c Candidate, editionID int64, state *sourceState) bool {
+	indexed := 0
+	for _, f := range state.files {
+		if f.editionID == editionID {
+			indexed++
+		}
+	}
+	if indexed != len(c.Files) {
+		return true
+	}
+
+	for ordinal, f := range c.Files {
+		existing, ok := state.files[f.Path]
+		if !ok || existing.editionID != editionID ||
+			existing.size != f.Size || existing.modified != stampFile(f.ModTime) ||
+			existing.ordinal != ordinal {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Scanner) upsertFiles(ctx context.Context, tx *sql.Tx, c Candidate,
+	editionID int64, state *sourceState, res *Result) error {
 
 	for ordinal, f := range c.Files {
 		modified := stampFile(f.ModTime)
@@ -254,8 +323,16 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 		}
 		res.FilesAdded++
 	}
+	return nil
+}
 
-	return tx.Commit()
+func bookOf(ctx context.Context, tx *sql.Tx, editionID int64) (int64, error) {
+	var bookID int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT book_id FROM editions WHERE id = ?`, editionID).Scan(&bookID); err != nil {
+		return 0, fmt.Errorf("read book of edition %d: %w", editionID, err)
+	}
+	return bookID, nil
 }
 
 // matchEdition lets a candidate's files vote for the edition they already
@@ -282,29 +359,37 @@ func matchEdition(c Candidate, state *sourceState) int64 {
 	return best
 }
 
-func createEdition(ctx context.Context, tx *sql.Tx, src *model.Source, c Candidate) (int64, error) {
-	// One book per edition until Phase 5 groups them; the title is provisional
-	// until 4.3 reads embedded metadata and 4.4 parses the path convention.
-	title := provisionalTitle(c)
+func createEdition(ctx context.Context, tx *sql.Tx, src *model.Source,
+	c Candidate, md metadata.Metadata) (editionRef, error) {
+
+	// One book per edition until Phase 5 groups them.
+	title := md.Title
+	if title == "" {
+		title = provisionalTitle(c)
+	}
 
 	book, err := tx.ExecContext(ctx,
 		`INSERT INTO books (title, sort_title, match_key) VALUES (?, ?, ?)`,
 		title, sortTitle(title), matchKey(title))
 	if err != nil {
-		return 0, fmt.Errorf("insert book %q: %w", title, err)
+		return editionRef{}, fmt.Errorf("insert book %q: %w", title, err)
 	}
 	bookID, err := book.LastInsertId()
 	if err != nil {
-		return 0, err
+		return editionRef{}, err
 	}
 
 	edition, err := tx.ExecContext(ctx,
 		`INSERT INTO editions (book_id, source_id, format, kind) VALUES (?, ?, ?, ?)`,
 		bookID, src.ID, string(c.Format), string(c.Format.Kind()))
 	if err != nil {
-		return 0, fmt.Errorf("insert edition for %q: %w", title, err)
+		return editionRef{}, fmt.Errorf("insert edition for %q: %w", title, err)
 	}
-	return edition.LastInsertId()
+	editionID, err := edition.LastInsertId()
+	if err != nil {
+		return editionRef{}, err
+	}
+	return editionRef{edition: editionID, book: bookID}, nil
 }
 
 // sweep deletes what disk no longer has. An edition left with no files goes
