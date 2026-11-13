@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/not-emily/bardbookserver/internal/api"
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
+	"github.com/not-emily/bardbookserver/internal/jobs"
+	"github.com/not-emily/bardbookserver/internal/scan"
 )
 
 // version is overridden at build time via -ldflags.
@@ -35,7 +38,9 @@ func run(args []string) error {
 	case "serve":
 		return cmdServe(args[1:])
 	case "scan":
-		return notImplemented("scan", 4)
+		return cmdScan(args[1:])
+	case "source":
+		return cmdSource(args[1:])
 	case "user":
 		return cmdUser(args[1:])
 	case "export":
@@ -57,7 +62,8 @@ func usage() {
 
 Usage:
   bard serve [--config PATH]   Run the server
-  bard scan                    Scan configured sources
+  bard scan [--source NAME]    Scan configured sources
+  bard source add|list         Manage directory roots
   bard user add|passwd|pin|list
                                Manage accounts
   bard export                  Export database and caches
@@ -103,7 +109,26 @@ func cmdServe(args []string) error {
 		"instance", instanceID,
 		"data_dir", cfg.DataDir)
 
-	return api.NewServer(cfg, database, logger, version).Run(ctx)
+	workCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+
+	queue := jobs.NewQueue(database.DB)
+	pool := jobs.NewPool(queue, cfg.Workers, logger)
+	scan.NewScanner(database.DB, logger).Register(pool)
+
+	var workers sync.WaitGroup
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		if err := pool.Run(workCtx); err != nil {
+			logger.Error("job pool stopped", "error", err)
+		}
+	}()
+
+	err = api.NewServer(cfg, database, logger, version).Run(ctx)
+	stopWorkers()
+	workers.Wait()
+	return err
 }
 
 func newLogger(level string) *slog.Logger {

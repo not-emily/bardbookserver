@@ -83,15 +83,18 @@ Never rename or move a file in this phase or any other. Filing uploads into the 
 
 ## Validation
 
-- [ ] Scanning a fixture tree produces the expected sources, editions, and files
-- [ ] A folder of MP3s becomes one edition with correctly ordered parts, not N editions
+- [x] Scanning a fixture tree produces the expected sources, editions, and files
+- [x] A folder of MP3s becomes one edition with correctly ordered parts, not N editions
 - [ ] M4B chapters are extracted with correct titles and offsets
 - [ ] EPUB 2 (`toc.ncx`) and EPUB 3 (`nav.xhtml`) both yield chapters
 - [ ] Covers are extracted for all four formats and cached
-- [ ] A second scan with no filesystem changes performs no writes
-- [ ] Touching one file's mtime rescans that file alone
+- [x] A second scan with no filesystem changes performs no writes
+- [x] Touching one file's mtime rescans that file alone
 - [ ] Sidecars are written when the source allows and absent when it does not
 - [ ] A read-only source scans without error
 - [ ] Killing the process mid-scan and restarting resumes without duplicate rows
+      — partially covered: a requeue after a crash and a repeated scan are both
+      tested, but no test actually kills the process
 - [ ] A file with no embedded metadata gets title and author from its path
-- [ ] No file is renamed or moved during any scan
+      — title only, provisionally, from the filename or folder name
+- [x] No file is renamed or moved during any scan
