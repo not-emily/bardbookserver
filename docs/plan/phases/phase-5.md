@@ -45,12 +45,15 @@ Abridged and unabridged editions group under one book, distinguished by the edit
 
 ## Validation
 
-- [ ] An EPUB and an M4B of the same title group into one book with two editions
-- [ ] Two narrations of one title group into one book with two audiobook editions
-- [ ] Matching ISBNs force a group even when titles differ cosmetically
-- [ ] Differing ISBNs prevent a group even when titles match exactly
-- [ ] A manual split survives a full rescan
-- [ ] A manual merge survives deleting the database and rescanning from disk
-- [ ] Author name variants normalize to one match key
-- [ ] Two distinct books with similar titles are not merged
-- [ ] Grouping confidence is recorded and uncertain matches are queryable
+- [x] An EPUB and an M4B of the same title group into one book with two editions
+- [x] Two narrations of one title group into one book with two audiobook editions
+- [x] Matching ISBNs force a group even when titles differ cosmetically
+- [ ] ~~Differing ISBNs prevent a group~~ — **not implemented, deliberately.**
+      An ebook and its audiobook carry different ISBNs, as do two printings of
+      one novel, so this would break the two items above it. Precision comes
+      from title plus author instead. See DECISIONS.md.
+- [x] A manual split survives a full rescan
+- [x] A manual merge survives deleting the database and rescanning from disk
+- [x] Author name variants normalize to one match key
+- [x] Two distinct books with similar titles are not merged
+- [x] Grouping confidence is recorded and uncertain matches are queryable

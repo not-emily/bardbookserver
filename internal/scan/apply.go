@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/not-emily/bardbookserver/internal/grouping"
 	"github.com/not-emily/bardbookserver/internal/metadata"
 	"github.com/not-emily/bardbookserver/internal/model"
 )
@@ -30,8 +31,8 @@ func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
 	book := &updates{}
 	if md.Title != "" && !bookLocks.Has(model.FieldTitle) {
 		book.set("title", md.Title)
-		book.set("sort_title", sortTitle(md.Title))
-		book.set("match_key", matchKey(md.Title))
+		book.set("sort_title", grouping.SortTitle(md.Title))
+		book.set("match_key", bookMatchKey(md))
 	}
 	if md.Subtitle != "" && !bookLocks.Has(model.FieldSubtitle) {
 		book.set("subtitle", md.Subtitle)
@@ -166,7 +167,7 @@ func loadLocks(ctx context.Context, tx *sql.Tx, ref editionRef) (book, edition m
 }
 
 func upsertSeries(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
-	key := matchKey(name)
+	key := grouping.NormalizeTitle(name)
 
 	var id int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM series WHERE match_key = ?`, key).Scan(&id)
@@ -179,15 +180,17 @@ func upsertSeries(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
 
 	out, err := tx.ExecContext(ctx,
 		`INSERT INTO series (name, sort_name, match_key) VALUES (?, ?, ?)`,
-		name, sortTitle(name), key)
+		name, grouping.SortTitle(name), key)
 	if err != nil {
 		return 0, fmt.Errorf("insert series %q: %w", name, err)
 	}
 	return out.LastInsertId()
 }
 
+// upsertContributor normalizes through the author folder, so "J.K. Rowling"
+// and "J. K. Rowling" become one contributor rather than two.
 func upsertContributor(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
-	key := matchKey(name)
+	key := grouping.NormalizeAuthor(name)
 
 	var id int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM contributors WHERE match_key = ?`, key).Scan(&id)
@@ -200,7 +203,7 @@ func upsertContributor(ctx context.Context, tx *sql.Tx, name string) (int64, err
 
 	out, err := tx.ExecContext(ctx,
 		`INSERT INTO contributors (name, sort_name, match_key) VALUES (?, ?, ?)`,
-		name, sortPerson(name), key)
+		name, grouping.SortPerson(name), key)
 	if err != nil {
 		return 0, fmt.Errorf("insert contributor %q: %w", name, err)
 	}
@@ -274,13 +277,12 @@ func setFileDurations(ctx context.Context, tx *sql.Tx, editionID int64, duration
 	return nil
 }
 
-// sortPerson files a name by its last word, which is how a shelf is ordered.
-// Phase 8 providers supply a proper file-as value where one exists.
-func sortPerson(name string) string {
-	fields := strings.Fields(name)
-	if len(fields) < 2 {
-		return name
+// bookMatchKey is the book's grouping identity: the same exact key its
+// editions offer, so the column stays meaningful next to edition_keys.
+func bookMatchKey(md metadata.Metadata) string {
+	candidate := grouping.Candidate{Title: md.Title, Authors: md.Authors}
+	if key := candidate.Keys().Exact; key != "" {
+		return key
 	}
-	last := fields[len(fields)-1]
-	return last + ", " + strings.Join(fields[:len(fields)-1], " ")
+	return grouping.NormalizeTitle(md.Title)
 }

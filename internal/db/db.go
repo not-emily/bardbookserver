@@ -31,6 +31,10 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	pragmas.Add("_pragma", "busy_timeout(5000)")
 	pragmas.Add("_pragma", "synchronous(NORMAL)")
 
+	// A deferred transaction that reads before writing cannot upgrade, and WAL
+	// reports that as SQLITE_BUSY without honouring busy_timeout.
+	pragmas.Set("_txlock", "immediate")
+
 	sqlDB, err := sql.Open("sqlite", "file:"+path+"?"+pragmas.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)

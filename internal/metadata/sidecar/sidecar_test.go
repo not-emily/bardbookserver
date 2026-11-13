@@ -63,8 +63,6 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// Only locked fields outrank the file itself, so a parser improvement still
-// reaches everything a person has not corrected by hand.
 func TestLockedMetadataIsOnlyTheLockedFields(t *testing.T) {
 	entry := FromMetadata(metadata.Metadata{
 		Title:     "Hand Corrected",
@@ -87,7 +85,7 @@ func TestLockedMetadataIsOnlyTheLockedFields(t *testing.T) {
 		t.Errorf("language %q leaked into the locked set", locked.Language)
 	}
 
-	// The full record still remembers everything, for the lowest precedence.
+	// The full record still remembers everything.
 	if all := entry.Metadata(); all.Publisher != "Ace" || all.Language != "en" {
 		t.Errorf("the full record lost data: %+v", all)
 	}
@@ -115,8 +113,7 @@ func TestReadRejectsCorruptJSON(t *testing.T) {
 	}
 }
 
-// A rescan of an unchanged library must not touch the media tree at all, so an
-// identical write is skipped rather than rewritten.
+// A rescan must not touch the media tree at all.
 func TestWriteSkipsAnIdenticalFile(t *testing.T) {
 	dir := t.TempDir()
 	file := &File{Editions: map[string]Edition{"Dune.epub": {Title: "Dune"}}}
@@ -162,7 +159,7 @@ func TestWriteToAReadOnlyDirectoryFails(t *testing.T) {
 	}
 }
 
-// A sidecar written by a newer Bard must still load here.
+// A sidecar from a newer Bard must still load.
 func TestUnknownFieldsAndLocksAreIgnored(t *testing.T) {
 	dir := t.TempDir()
 	raw := `{
@@ -192,8 +189,7 @@ func TestUnknownFieldsAndLocksAreIgnored(t *testing.T) {
 	}
 }
 
-// The file is meant to be read and edited by a person, so it is indented and
-// carries no empty keys.
+// A person is meant to be able to read and edit it.
 func TestWriteIsReadableAndOmitsEmptyFields(t *testing.T) {
 	dir := t.TempDir()
 	file := &File{Editions: map[string]Edition{
@@ -227,8 +223,7 @@ func TestWriteIsReadableAndOmitsEmptyFields(t *testing.T) {
 	}
 }
 
-// Chapters and cover art stay out: both are re-derived every scan, and neither
-// belongs in a file a person is meant to edit.
+// Both are re-derived every scan, and neither belongs in a hand-edited file.
 func TestChaptersAndCoversAreNotRecorded(t *testing.T) {
 	entry := FromMetadata(metadata.Metadata{
 		Title:    "Dune",

@@ -16,7 +16,6 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-// sidecarScanner builds a scanner over root with sidecar writing on or off.
 func sidecarScanner(t *testing.T, root string, writeSidecars bool) (*Scanner, *db.DB, int64) {
 	t.Helper()
 	d := testDB(t)
@@ -68,7 +67,6 @@ func TestSidecarsAreWrittenWhenTheSourceAllowsIt(t *testing.T) {
 	if entry.ISBN != "9780618574986" {
 		t.Errorf("sidecar isbn %q", entry.ISBN)
 	}
-	// Nothing was hand-corrected, so nothing outranks the file yet.
 	if len(entry.Locked) != 0 {
 		t.Errorf("sidecar locked %v, want none", entry.Locked)
 	}
@@ -88,14 +86,12 @@ func TestSidecarsAreAbsentWhenTheSourceForbidsIt(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, sidecar.Filename)); !os.IsNotExist(err) {
 		t.Errorf("bard.json exists: %v", err)
 	}
-	// The index is populated regardless.
 	if n := countRows(t, d, "editions"); n != 1 {
 		t.Errorf("%d editions, want the scan to have worked anyway", n)
 	}
 }
 
-// A read-only source must keep everything in SQLite, warn once, and stop
-// trying rather than failing once per directory.
+// One warning for the whole scan, not one per directory.
 func TestReadOnlySourceDegradesWithOneWarning(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
@@ -160,8 +156,6 @@ func TestCleanRescanWritesNoSidecar(t *testing.T) {
 	}
 }
 
-// The whole point of the sidecar: a correction outranks what the file says,
-// and keeps doing so after the database is thrown away.
 func TestLockedSidecarFieldOutranksTheFile(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Tolkien")
@@ -170,7 +164,7 @@ func TestLockedSidecarFieldOutranksTheFile(t *testing.T) {
 	s, _, sourceID := sidecarScanner(t, root, true)
 	mustScan(t, s, sourceID)
 
-	// Stand in for a hand correction made through the admin UI.
+	// Stands in for a correction made through the admin UI.
 	file := readSidecar(t, dir)
 	entry := file.Editions["fotr.epub"]
 	entry.Title = "The Fellowship of the Ring: Illustrated"
@@ -180,7 +174,7 @@ func TestLockedSidecarFieldOutranksTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fresh database, as if the index had been deleted and rebuilt.
+	// A fresh database, as if the index had been deleted.
 	s2, d2, sourceID2 := sidecarScanner(t, root, true)
 	mustScan(t, s2, sourceID2)
 
@@ -189,15 +183,13 @@ func TestLockedSidecarFieldOutranksTheFile(t *testing.T) {
 		t.Errorf("titles %v, want the locked correction to survive a rebuild", titles)
 	}
 
-	// The unlocked fields still came from the file.
 	publishers := queryStrings(t, d2, `SELECT publisher FROM editions`)
 	if len(publishers) != 1 || publishers[0] != "Allen and Unwin" {
 		t.Errorf("publishers %v, want the file still consulted for unlocked fields", publishers)
 	}
 }
 
-// An unlocked sidecar value must not freeze the metadata, or a parser fix
-// could never reach a library that has already been scanned once.
+// Otherwise a parser fix could never reach an already-scanned library.
 func TestUnlockedSidecarValueDoesNotOutrankTheFile(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Tolkien")
@@ -228,8 +220,7 @@ func TestUnlockedSidecarValueDoesNotOutrankTheFile(t *testing.T) {
 	}
 }
 
-// A value nothing can re-derive still survives, which is what makes the
-// sidecar worth writing for provider data in Phase 8.
+// This is what will carry Phase 8 provider data.
 func TestSidecarRemembersWhatNothingCanRederive(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Tolkien")
@@ -297,7 +288,6 @@ func TestSidecarHoldsSeveralEditionsFromOneDirectory(t *testing.T) {
 	s, _, sourceID := sidecarScanner(t, root, true)
 	res := mustScan(t, s, sourceID)
 
-	// One file per directory, however many editions share it.
 	if res.SidecarsWritten != 1 {
 		t.Errorf("wrote %d sidecars, want 1 for the directory", res.SidecarsWritten)
 	}
@@ -353,14 +343,13 @@ func TestCorruptSidecarWarnsAndScanProceeds(t *testing.T) {
 		t.Errorf("%d editions, want the scan to proceed past the bad sidecar", n)
 	}
 
-	// The corrupt file is replaced rather than left to fail every scan.
+	// Replaced, rather than left to fail every future scan.
 	file := readSidecar(t, root)
 	if _, ok := file.Editions["fotr.epub"]; !ok {
 		t.Errorf("entries %v, want the sidecar rewritten", file.Editions)
 	}
 }
 
-// Writing a sidecar adds a file; it must never disturb the media beside it.
 func TestWritingSidecarsLeavesTheMediaAlone(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "Tolkien", "fotr.epub")
@@ -393,7 +382,6 @@ func TestWritingSidecarsLeavesTheMediaAlone(t *testing.T) {
 		t.Error("the book file's contents changed")
 	}
 
-	// And the sidecar it added is valid json.
 	raw, err := os.ReadFile(filepath.Join(root, "Tolkien", sidecar.Filename))
 	if err != nil {
 		t.Fatal(err)

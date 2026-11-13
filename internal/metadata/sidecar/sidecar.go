@@ -40,6 +40,11 @@ type Edition struct {
 	// everything else.
 	Locked []string `json:"locked,omitempty"`
 
+	// Group ties this edition to the others a person merged it with. It lives
+	// here rather than only in the database because a merge has to survive the
+	// index being deleted and rebuilt from disk.
+	Group string `json:"group,omitempty"`
+
 	Title          string   `json:"title,omitempty"`
 	Subtitle       string   `json:"subtitle,omitempty"`
 	Description    string   `json:"description,omitempty"`

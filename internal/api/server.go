@@ -50,6 +50,9 @@ func (s *Server) handler() http.Handler {
 	authed.HandleFunc("POST /api/v1/auth/switch", s.handleSwitchProfile)
 	authed.HandleFunc("GET /api/v1/devices", s.handleListDevices)
 	authed.HandleFunc("DELETE /api/v1/devices/{id}", s.handleRevokeDevice)
+	authed.HandleFunc("GET /api/v1/groupings/uncertain", s.handleListUncertainGroupings)
+	authed.HandleFunc("POST /api/v1/editions/{id}/group", s.handleMergeEdition)
+	authed.HandleFunc("DELETE /api/v1/editions/{id}/group", s.handleSplitEdition)
 	mux.Handle("/api/v1/", s.requireAuth(authed))
 
 	resolver := proxyResolver{trusted: s.cfg.TrustedPrefixes()}

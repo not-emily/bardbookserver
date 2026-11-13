@@ -281,9 +281,13 @@ func TestRemovingFilesRemovesTheEdition(t *testing.T) {
 	if n := countRows(t, d, "editions"); n != 1 {
 		t.Errorf("%d editions left, want 1", n)
 	}
-	// Phase 5 reaps the editionless book; the scan leaves it alone.
-	if n := countRows(t, d, "books"); n != 2 {
-		t.Errorf("%d books, want 2 until Phase 5 reaps the editionless one", n)
+	// The book goes with its last edition: an editionless book cannot be read
+	// by anyone and denies for a restricted account.
+	if res.BooksReaped != 1 {
+		t.Errorf("reaped %d books, want 1", res.BooksReaped)
+	}
+	if n := countRows(t, d, "books"); n != 1 {
+		t.Errorf("%d books, want the editionless one reaped", n)
 	}
 }
 

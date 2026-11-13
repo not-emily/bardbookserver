@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// parseRel runs the convention parser over a path relative to a notional root,
-// choosing the single-file or folder shape from how many files are given.
+// parseRel picks the single-file or folder shape from how many files it gets.
 func parseRel(root string, rel string, files ...string) (string, []string, string, *float64, *bool) {
 	c := Candidate{Dir: filepath.Join(root, rel)}
 	if len(files) == 0 {
@@ -131,8 +130,7 @@ func TestParsePathConvention(t *testing.T) {
 	}
 }
 
-// A leading number outside a series directory is part of the title, not an
-// ordinal, or "100 Years of Solitude" loses its hundred.
+// Or "100 Years of Solitude" loses its hundred.
 func TestParsePathKeepsNumbersThatAreTitles(t *testing.T) {
 	const root = "/library"
 
@@ -199,8 +197,7 @@ func TestParsePathStripsFilenameNoise(t *testing.T) {
 }
 
 func TestParsePathOutsideItsRoot(t *testing.T) {
-	// A candidate that does not sit under the root yields nothing rather than
-	// guessing from a relative path full of "..".
+	// Rather than guessing from a relative path full of "..".
 	md := parsePath("/library", Candidate{
 		Dir:   "/elsewhere",
 		Files: []CandidateFile{{Path: "/elsewhere/Dune.epub"}},

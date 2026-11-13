@@ -165,7 +165,9 @@ func TestScanAppliesEmbeddedMetadata(t *testing.T) {
 	if sortT != "Fellowship of the Ring" {
 		t.Errorf("sort_title %q, want the article dropped", sortT)
 	}
-	if key != "fellowship of the ring" {
+	// The grouping key carries the author, or two different books sharing a
+	// title would collapse into one.
+	if key != "fellowship of the ring|jrr tolkien" {
 		t.Errorf("match_key %q", key)
 	}
 	if description != "A hobbit leaves home." {

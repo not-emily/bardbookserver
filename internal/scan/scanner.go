@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/not-emily/bardbookserver/internal/grouping"
 	"github.com/not-emily/bardbookserver/internal/jobs"
 	"github.com/not-emily/bardbookserver/internal/media"
 	"github.com/not-emily/bardbookserver/internal/metadata"
@@ -38,8 +39,7 @@ func (s *Scanner) Register(p *jobs.Pool) {
 	p.Register(KindScanSource, s.handleScanSource)
 }
 
-// EnqueueSource queues a scan, collapsing into one already queued for the same
-// source rather than scanning it twice at once.
+// EnqueueSource collapses into a scan already queued for the same source.
 func EnqueueSource(ctx context.Context, q *jobs.Queue, sourceID int64) (int64, error) {
 	return q.Enqueue(ctx, jobs.Request{
 		Kind:      KindScanSource,
@@ -64,7 +64,8 @@ func (s *Scanner) handleScanSource(ctx context.Context, j *jobs.Job) error {
 		"files_added", res.FilesAdded, "files_updated", res.FilesUpdated,
 		"files_removed", res.FilesRemoved, "metadata_applied", res.MetadataApplied,
 		"covers_stored", res.CoversStored, "sidecars_written", res.SidecarsWritten,
-		"warnings", len(res.Warnings))
+		"editions_grouped", res.EditionsGrouped, "editions_regrouped", res.EditionsRegrouped,
+		"books_reaped", res.BooksReaped, "warnings", len(res.Warnings))
 	return nil
 }
 
@@ -84,6 +85,10 @@ type Result struct {
 	MetadataApplied int
 	CoversStored    int
 	SidecarsWritten int
+
+	EditionsGrouped   int
+	EditionsRegrouped int
+	BooksReaped       int
 
 	Warnings []error
 }
@@ -155,17 +160,18 @@ type sourceState struct {
 	files    map[string]*existingFile
 	editions map[int64]model.Format
 
-	// Sidecars are per directory but editions are per candidate, so each
-	// directory's file is read once, amended by every candidate in it, and
-	// written back once at the end.
+	// Loaded up front to spare a query per candidate on an unchanged rescan.
+	groups map[int64]string
+
+	// Per directory, not per candidate: read once, amended by each edition in
+	// it, written back once.
 	sidecars    map[string]*sidecar.File
 	sidecarDirs []string
 	seenKeys    map[string]map[string]bool
 }
 
-// sidecarFor reads a directory's bard.json once. A missing or unreadable one
-// yields an empty record: a hand-edited file with a stray comma must not fail
-// the scan.
+// sidecarFor yields an empty record for a missing or corrupt file: a stray
+// comma in a hand-edited bard.json must not fail the scan.
 func (s *Scanner) sidecarFor(state *sourceState, dir string, res *Result) *sidecar.File {
 	if file, ok := state.sidecars[dir]; ok {
 		return file
@@ -182,7 +188,6 @@ func (s *Scanner) sidecarFor(state *sourceState, dir string, res *Result) *sidec
 	return file
 }
 
-// entryKey names an edition within its directory.
 func entryKey(c Candidate) string {
 	if len(c.Files) == 1 {
 		return filepath.Base(c.Files[0].Path)
@@ -190,10 +195,8 @@ func entryKey(c Candidate) string {
 	return sidecar.DirKey
 }
 
-// flushSidecars writes each touched directory's record, when the source allows
-// it. The first failure ends the attempt for the whole scan: a read-only
-// source must degrade to keeping everything in SQLite, with one warning rather
-// than one per directory.
+// flushSidecars stops at the first failure, so a read-only source warns once
+// rather than once per directory.
 func (s *Scanner) flushSidecars(src *model.Source, state *sourceState, res *Result) {
 	if !src.WriteSidecars {
 		return
@@ -224,7 +227,8 @@ func (s *Scanner) flushSidecars(src *model.Source, state *sourceState, res *Resu
 
 func (s *Scanner) loadState(ctx context.Context, sourceID int64) (*sourceState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT f.id, f.path, f.size_bytes, f.modified_at, f.ordinal, f.edition_id, e.format
+		SELECT f.id, f.path, f.size_bytes, f.modified_at, f.ordinal, f.edition_id,
+		       e.format, COALESCE(e.group_key, '')
 		  FROM files f JOIN editions e ON e.id = f.edition_id
 		 WHERE e.source_id = ?`, sourceID)
 	if err != nil {
@@ -235,27 +239,32 @@ func (s *Scanner) loadState(ctx context.Context, sourceID int64) (*sourceState, 
 	state := &sourceState{
 		files:    map[string]*existingFile{},
 		editions: map[int64]model.Format{},
+		groups:   map[int64]string{},
 		sidecars: map[string]*sidecar.File{},
 		seenKeys: map[string]map[string]bool{},
 	}
 	for rows.Next() {
 		var (
-			f      existingFile
-			path   string
-			format model.Format
+			f        existingFile
+			path     string
+			format   model.Format
+			groupKey string
 		)
-		if err := rows.Scan(&f.id, &path, &f.size, &f.modified, &f.ordinal, &f.editionID, &format); err != nil {
+		if err := rows.Scan(&f.id, &path, &f.size, &f.modified, &f.ordinal, &f.editionID,
+			&format, &groupKey); err != nil {
 			return nil, fmt.Errorf("scan indexed file: %w", err)
 		}
 		state.files[path] = &f
 		state.editions[f.editionID] = format
+		if groupKey != "" {
+			state.groups[f.editionID] = groupKey
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	// Editions with no files at all are invisible to the query above but still
-	// need sweeping, so record them too.
+	// Fileless editions are invisible to the join above but still need sweeping.
 	empty, err := s.db.QueryContext(ctx, `
 		SELECT e.id, e.format FROM editions e
 		 WHERE e.source_id = ?
@@ -281,9 +290,8 @@ func (s *Scanner) loadState(ctx context.Context, sourceID int64) (*sourceState, 
 func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate, state *sourceState, res *Result) error {
 	editionID := matchEdition(c, state)
 
-	// Parsing is the expensive half of a scan, so it happens only for a new
-	// edition or one whose bytes moved. This is what keeps a rescan of an
-	// unchanged tree free.
+	// Parsing is the expensive half of a scan, and skipping it is what keeps a
+	// rescan of an unchanged tree free.
 	changed := editionID == 0 || filesChanged(c, editionID, state)
 
 	key := entryKey(c)
@@ -303,10 +311,9 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 		if parsed, err = embedded.Parse(c.Format, c.paths()); err != nil {
 			res.Warnings = append(res.Warnings, err)
 		}
-		// Precedence, highest first: a hand correction, then what the file
-		// says, then what its path implies, and last whatever the sidecar
-		// remembers that nothing here could re-derive. Phase 8 inserts
-		// providers between the locked fields and the embedded parsers.
+		// Highest precedence first. The sidecar appears twice on purpose: its
+		// locked fields outrank the file, the rest only fills what nothing
+		// else could re-derive. Phase 8 inserts providers after the locks.
 		md = metadata.Resolve(
 			entry.LockedMetadata(),
 			parsed.Metadata,
@@ -321,13 +328,23 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 	}
 	defer tx.Rollback()
 
+	var spot placement
+	if changed {
+		if spot, err = s.place(ctx, tx, src, c, md, entry, editionID); err != nil {
+			return err
+		}
+	}
+
 	ref := editionRef{edition: editionID}
 	if editionID == 0 {
-		if ref, err = createEdition(ctx, tx, src, c, md); err != nil {
+		if ref, err = createEdition(ctx, tx, src, c, md, spot); err != nil {
 			return err
 		}
 		state.editions[ref.edition] = c.Format
 		res.EditionsAdded++
+		if spot.book != 0 {
+			res.EditionsGrouped++
+		}
 	} else if ref.book, err = bookOf(ctx, tx, editionID); err != nil {
 		return err
 	}
@@ -336,19 +353,131 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 		return err
 	}
 
+	// A merge recorded since the last scan changed no file, so the sidecar
+	// would never learn about it without this.
+	if !changed {
+		if group := state.groups[editionID]; group != entry.Group {
+			entry.Group = group
+			record.Editions[key] = entry
+		}
+	}
+
 	if changed {
+		if editionID != 0 {
+			if err := regroup(ctx, tx, &ref, spot, res); err != nil {
+				return err
+			}
+		}
+		if err := grouping.SetKeys(ctx, tx, ref.edition, spot.keys); err != nil {
+			return err
+		}
+
 		locks, err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations, res)
 		if err != nil {
 			return err
 		}
-		record.Editions[key] = sidecar.FromMetadata(md, locks)
+
+		out := sidecar.FromMetadata(md, locks)
+		out.Group = spot.groupKey
+		record.Editions[key] = out
 	}
 
 	return tx.Commit()
 }
 
-// filesChanged reports whether the candidate differs from what is indexed for
-// this edition, in content, ordering, or membership.
+type placement struct {
+	// book is zero when nothing matched and a new one is needed.
+	book       int64
+	reason     grouping.Reason
+	confidence float64
+
+	// groupKey is set only when a person placed this edition by hand.
+	groupKey string
+	keys     grouping.Keys
+}
+
+// place lets a manual decision win outright, and asks the matcher otherwise.
+func (s *Scanner) place(ctx context.Context, tx *sql.Tx, src *model.Source, c Candidate,
+	md metadata.Metadata, entry sidecar.Edition, editionID int64) (placement, error) {
+
+	candidate := grouping.Candidate{
+		Title:   md.Title,
+		Authors: md.Authors,
+		ISBN:    md.ISBN,
+		ASIN:    md.ASIN,
+	}
+	spot := placement{keys: candidate.Keys()}
+
+	editionKey := grouping.EditionKey(spot.keys.Identifier,
+		grouping.RelativeKey(src.Path, c.Files[0].Path))
+
+	// Importing from the sidecar is what carries a merge through the index
+	// being deleted and rebuilt from disk.
+	groupKey, decided, err := grouping.DecisionFor(ctx, tx, editionKey)
+	if err != nil {
+		return spot, err
+	}
+	if !decided && entry.Group != "" {
+		if err := grouping.RecordDecision(ctx, tx, editionKey, entry.Group); err != nil {
+			return spot, err
+		}
+		groupKey, decided = entry.Group, true
+	}
+
+	if decided {
+		spot.groupKey = groupKey
+		spot.reason = grouping.ReasonManual
+		spot.confidence = grouping.ConfidenceManual
+
+		book, found, err := grouping.BookForGroup(ctx, tx, groupKey, editionID)
+		if err != nil {
+			return spot, err
+		}
+		if found {
+			spot.book = book
+		}
+		return spot, nil
+	}
+
+	book, reason, found, err := grouping.BookForKeys(ctx, tx, spot.keys, editionID)
+	if err != nil {
+		return spot, err
+	}
+	if found {
+		spot.book, spot.reason, spot.confidence = book, reason, grouping.Confidence(reason)
+		return spot, nil
+	}
+
+	spot.reason, spot.confidence = grouping.ReasonNew, grouping.ConfidenceNew
+	return spot, nil
+}
+
+// regroup leaves an edition where it is when nothing matches: keys can go
+// missing between scans, and that must not tear a grouping apart.
+func regroup(ctx context.Context, tx *sql.Tx, ref *editionRef, spot placement, res *Result) error {
+	update := &updates{}
+	update.set("match_reason", string(spot.reason))
+	update.set("match_confidence", spot.confidence)
+
+	if spot.groupKey != "" {
+		update.set("group_key", spot.groupKey)
+	}
+	if spot.book != 0 && spot.book != ref.book {
+		update.set("book_id", spot.book)
+		res.EditionsRegrouped++
+	}
+
+	update.set("updated_at", sqlNow)
+	if err := update.exec(ctx, tx, "editions", ref.edition); err != nil {
+		return err
+	}
+	if spot.book != 0 {
+		ref.book = spot.book
+	}
+	return nil
+}
+
+// filesChanged covers content, ordering and membership.
 func filesChanged(c Candidate, editionID int64, state *sourceState) bool {
 	indexed := 0
 	for _, f := range state.files {
@@ -428,9 +557,8 @@ func bookOf(ctx context.Context, tx *sql.Tx, editionID int64) (int64, error) {
 	return bookID, nil
 }
 
-// matchEdition lets a candidate's files vote for the edition they already
-// belong to, so a part added to an audiobook folder extends that edition
-// instead of starting a second one.
+// matchEdition lets the files vote, so a part added to an audiobook folder
+// extends its edition instead of starting a second one.
 func matchEdition(c Candidate, state *sourceState) int64 {
 	votes := map[int64]int{}
 	for _, f := range c.Files {
@@ -453,28 +581,37 @@ func matchEdition(c Candidate, state *sourceState) int64 {
 }
 
 func createEdition(ctx context.Context, tx *sql.Tx, src *model.Source,
-	c Candidate, md metadata.Metadata) (editionRef, error) {
+	c Candidate, md metadata.Metadata, spot placement) (editionRef, error) {
 
-	// One book per edition until Phase 5 groups them.
 	title := md.Title
 	if title == "" {
 		title = provisionalTitle(c)
 	}
 
-	book, err := tx.ExecContext(ctx,
-		`INSERT INTO books (title, sort_title, match_key) VALUES (?, ?, ?)`,
-		title, sortTitle(title), matchKey(title))
-	if err != nil {
-		return editionRef{}, fmt.Errorf("insert book %q: %w", title, err)
-	}
-	bookID, err := book.LastInsertId()
-	if err != nil {
-		return editionRef{}, err
+	bookID := spot.book
+	if bookID == 0 {
+		book, err := tx.ExecContext(ctx,
+			`INSERT INTO books (title, sort_title, match_key) VALUES (?, ?, ?)`,
+			title, grouping.SortTitle(title), bookMatchKey(md))
+		if err != nil {
+			return editionRef{}, fmt.Errorf("insert book %q: %w", title, err)
+		}
+		if bookID, err = book.LastInsertId(); err != nil {
+			return editionRef{}, err
+		}
 	}
 
-	edition, err := tx.ExecContext(ctx,
-		`INSERT INTO editions (book_id, source_id, format, kind) VALUES (?, ?, ?, ?)`,
-		bookID, src.ID, string(c.Format), string(c.Format.Kind()))
+	var groupKey any
+	if spot.groupKey != "" {
+		groupKey = spot.groupKey
+	}
+
+	edition, err := tx.ExecContext(ctx, `
+		INSERT INTO editions
+			(book_id, source_id, format, kind, match_reason, match_confidence, group_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		bookID, src.ID, string(c.Format), string(c.Format.Kind()),
+		string(spot.reason), spot.confidence, groupKey)
 	if err != nil {
 		return editionRef{}, fmt.Errorf("insert edition for %q: %w", title, err)
 	}
@@ -485,8 +622,8 @@ func createEdition(ctx context.Context, tx *sql.Tx, src *model.Source,
 	return editionRef{edition: editionID, book: bookID}, nil
 }
 
-// sweep deletes what disk no longer has. An edition left with no files goes
-// too; the book it hangs off is Phase 5's to reap.
+// sweep deletes what disk no longer has: a file that is gone, an edition left
+// with none, and then any book nothing hangs off at all.
 func (s *Scanner) sweep(ctx context.Context, state *sourceState, res *Result) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -523,10 +660,17 @@ func (s *Scanner) sweep(ctx context.Context, state *sourceState, res *Result) er
 		res.EditionsRemoved++
 	}
 
+	// Regrouping can empty a book without deleting an edition, so this runs
+	// whether or not anything was swept.
+	reaped, err := grouping.ReapEditionlessBooks(ctx, tx)
+	if err != nil {
+		return err
+	}
+	res.BooksReaped = reaped
+
 	return tx.Commit()
 }
 
-// stampFile keeps sub-second precision, unlike the datetime('now') columns
-// elsewhere: a file rewritten within one second at the same size must not
-// survive the incremental skip, which compares this string.
+// stampFile keeps sub-second precision, unlike the datetime('now') columns:
+// a file rewritten within one second at the same size must not look unchanged.
 func stampFile(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
