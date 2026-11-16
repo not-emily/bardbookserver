@@ -41,6 +41,35 @@ func TestNamingAProviderEnablesOnlyThatOne(t *testing.T) {
 	}
 }
 
+// Registration order is precedence order, so this pins it: Audnexus is the
+// only one that knows narration, and it answers nothing but an audiobook it
+// was given an ASIN for.
+func TestAudnexusLeadsTheRegistry(t *testing.T) {
+	r := New(config.Metadata{
+		Providers: map[string]bool{
+			config.ProviderOpenLibrary: true,
+			config.ProviderGoogleBooks: true,
+			config.ProviderAudnexus:    true,
+		},
+		TimeoutSeconds: 10,
+	}, nil, discard())
+
+	want := []string{
+		config.ProviderAudnexus,
+		config.ProviderOpenLibrary,
+		config.ProviderGoogleBooks,
+	}
+	got := r.Names()
+	if len(got) != len(want) {
+		t.Fatalf("enabled providers are %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("enabled providers are %v, want %v", got, want)
+		}
+	}
+}
+
 // A dead or throttled provider must leave the scan successful on embedded
 // metadata alone. Goodreads killed its API with no notice in 2020.
 func TestAProviderFailureIsAWarningNotAFailure(t *testing.T) {

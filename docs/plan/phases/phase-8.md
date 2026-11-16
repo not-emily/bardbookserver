@@ -28,6 +28,10 @@ endpoint itself stay in 8.3.
 **Migration is `0010_metadata.sql`,** not `0008`: Phase 7 took `0008` and
 `0009`. Migrations are applied in filename order and forward only.
 
+**Pulled into 8.2 from Phase 4:** reading the Audible ASIN out of an M4B.
+Audnexus has no title search, so without an ASIN it can never be asked
+anything, and no parser produced one. See the decision log.
+
 ## Files to Create
 
 - `internal/metadata/provider/provider.go` — interface, registry, toggles
@@ -88,8 +92,10 @@ Metadata lookup sends titles to third parties, so every provider is off until ex
 
 - [x] A scanned book with an ISBN populates title, author, description, genre, and cover from a provider
       *(8.1: genre needs 8.4's taxonomy; subjects are retrieved and capped)*
-- [ ] An audiobook with an ASIN gets narrator and chapters from Audnexus
-- [ ] Local `chpl` chapters win over provider chapters when both exist
+- [x] An audiobook with an ASIN gets narrator and chapters from Audnexus
+      *(8.2: verified live; an audiobook with **no** ASIN cannot be matched at
+      all, since Audnexus has no title search)*
+- [x] Local `chpl` chapters win over provider chapters when both exist
 - [x] A hand-edited title survives a metadata refresh
 - [ ] Fix Match search returns ranked candidates and applying one replaces the metadata
 - [x] A provider returning 500 or timing out leaves the scan successful with embedded metadata

@@ -3,6 +3,100 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-16: A shared quota is not counted, it is obeyed
+
+**Decision:** No request budget is tracked. When a provider answers 429 or 403
+with a body naming a *daily* quota, an in-memory breaker stops asking that
+provider until the next UTC midnight. A per-minute rate limit is still retried,
+and the cache is still served while the breaker is open.
+
+**Rationale:** Google Books states its limit as a thousand queries a day rather
+than a rate, which the interval limiter cannot express. But keyless, that quota
+belongs to a shared anonymous project — verified live, where the quota was
+already exhausted by other callers before Bard sent anything. A local counter
+would therefore have been confidently wrong in both directions: refusing while
+quota remained, and asking after it was gone.
+
+The service's own refusal is the only reliable signal, so that is what Bard
+reads. Only the body distinguishes the two refusals, so the body is read on 429
+and 403 rather than inferring from the status.
+
+Not retrying is the point. A 5000-book backfill meeting a daily quota halfway
+would otherwise send 3 attempts for every remaining book — about seven thousand
+requests to a service that has already said no.
+
+**Alternatives Considered:** A persisted `provider_budget` table counting
+requests per day, which was the original plan until the live 429 showed the
+count could not be ours to keep. Treating a daily quota as an ordinary rate
+limit, which is what the retry loop did before and is the hammering above.
+
+**Impact:** No migration. The breaker is per provider and in memory, so a
+restart re-probes once and is re-refused once, which is acceptable at one
+wasted request a day. `TestADailyQuotaRefusalStopsAskingForTheDay` and
+`TestAPlainRateLimitIsStillRetried` are the pair that pin the distinction.
+
+---
+
+## 2026-11-16: Audnexus is ASIN-only, so the MP4 parser learned to read one
+
+**Decision:** Audnexus is registered first, serves audiobooks only, and
+searches nothing: it answers `/books/{asin}` or it does not answer. `ParseM4B`
+now reads the iTunes free-form `----` atom to extract the Audible ASIN.
+
+**Rationale:** Audnexus exposes no title search — confirmed by probing it,
+where every search-shaped route is a 404. So it can only ever be keyed on an
+ASIN, and before this nothing in Bard produced one from an audio file: the plan
+assumed the identifier would be there. Without the parser change the provider
+could never have fired, and the narrator facet would have stayed empty, which
+is the gap Audnexus exists to close.
+
+It leads the registry because it is the only source of narration and the only
+one that knows an audiobook's own edition. Since it declines every ebook, Open
+Library still leads for everything else.
+
+go-mp4 models neither the free-form atom nor its mean/name/data children, so
+the children are walked by hand — the same approach `chpl` already needed.
+
+**Alternatives Considered:** Deriving an ASIN from an ISBN through another
+provider, which is a guess dressed as an identifier. Leaving Audnexus keyed on
+nothing and skipping it, which is most of this phase's value for audiobooks.
+
+**Impact:** **An audiobook from a DRM-free store carries no ASIN at all** —
+both sample M4Bs are from Libro.fm and have none — so Audnexus cannot enrich
+them and their narrators stay empty. Documented rather than worked around.
+The free-form parser is pinned by a fixture matching the real atom layout but
+is **unverified against a genuine Audible file**, since the sample library has
+none. Audnexus also answers `REGION_UNAVAILABLE` with a 200 and an error
+object, which is read as "no match" rather than as a fault.
+
+---
+
+## 2026-11-16: The long description outranks the comment
+
+**Decision:** `ParseM4B` prefers the `ldes` or `desc` atom over the `©cmt`
+comment, reversing what Phase 4 did. `mp4TextAtom` reads those atoms by hand.
+
+**Rationale:** A Phase 4 bug found while wiring providers: `applyAudioTags` set
+the description from the comment *after* the atom had been consulted, so the
+comment always won. On the real library that makes Red Rising's description
+"Pierce Brown Purchased from Libro.fm." — a store's stamp standing as the
+book's blurb.
+
+The atom read was also dead code regardless: it went through go-mp4's typed
+extraction, which cannot descend into an atom it does not model, and `ldes` is
+not one it models. So the long description had never been read from any file.
+
+**Alternatives Considered:** Filtering junk-looking comments, which is a
+heuristic guessing at a store's wording. Dropping the comment entirely, which
+loses the only description an MP3 set ever has.
+
+**Impact:** The comment is still the fallback, so a file with nothing else
+keeps it. A provider description outranks both, so an enriched library sees
+this only where no provider matched. Rescanning is what applies the fix; there
+is no migration.
+
+---
+
 ## 2026-11-16: A provider fills only what the file cannot measure
 
 **Decision:** The plan's precedence chain — sidecar → provider → embedded →

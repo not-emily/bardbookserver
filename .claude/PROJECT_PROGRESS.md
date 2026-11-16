@@ -8,22 +8,22 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 8 is underway. 8.1 is done: the provider contract exists end to end,
-Open Library is implemented and verified against the live service, and a scan
-with a provider enabled enriches a book while a scan with none makes no
-outbound request at all.
+Phase 8 is underway. 8.1 and 8.2 are done: all three providers are implemented,
+Open Library and Audnexus are verified against the live services, and the
+narrator facet now has a source for the first time.
 
 ## Active Tasks
 - [IN PROGRESS] Phase 8: Metadata providers & taxonomy
   - ✅ 8.1: `Provider` interface, explicit registry, config toggles off by
     default, Open Library, response caching, rate limiting, match scoring
-  - ⏭ 8.2: Google Books and Audnexus, including Audnexus chapters and narrators
+  - ✅ 8.2: Google Books with a daily-quota breaker, Audnexus with narrators
+    and chapters, plus the M4B ASIN extraction Audnexus cannot work without
   - ⏭ 8.3: candidate ranking for Fix Match, `POST /api/v1/books/{id}/match`,
     a provider match pinned so a rescan does not undo a correction
   - ⏭ 8.4: canonical genre list, BISAC parser, subject mapping, `raw_subjects`
     retention, suggested `min_age`
-  - ⏭ Backfill narrators and genres, which are still empty — narrators need
-    8.2 (Audnexus), genres need 8.4
+  - ⏭ Genres are still empty; they need 8.4. Subjects now arrive from all
+    three providers and are waiting on the mapping table
 - [LATER] Phase 9 (age gating) — extends `BookScope.Apply`; wants Phase 8's
   suggested ages but can be built against hand-set ones
 - [LATER] Phase 10 (upload) — independent of 8 and 9
@@ -40,10 +40,23 @@ verified against.
 ## Open Questions/Blockers
 Nothing is blocked. These are known limitations carried forward.
 
-- Narrators and genres are still empty after a scan. Narrators want Audnexus
-  (8.2), since no sample audiobook sets the composer tag; genres want the
-  taxonomy (8.4), since nothing maps a subject string onto `book_genres` yet.
-  Subjects themselves now arrive from Open Library and are capped at 40.
+- **Audnexus cannot enrich the sample audiobooks.** It has no title search, so
+  it needs an ASIN, and both sample M4Bs are from Libro.fm and carry none.
+  Narrators stay empty for those two files whatever is enabled — they need a
+  composer tag or a hand edit. Audnexus works for Audible-sourced files, which
+  is where an ASIN comes from.
+- The M4B free-form ASIN parser is **unverified against a genuine Audible
+  file**, only against a fixture matching the documented atom layout. Worth
+  re-checking the first time a real AAX conversion is indexed.
+- **Google Books' live response shape is unverified**: the shared keyless quota
+  was already exhausted every time it was probed, so the fixtures come from the
+  documented shape rather than a recorded response. The breaker handling that
+  429 *is* verified live.
+- Genres are still empty; nothing maps a subject string onto `book_genres`
+  until 8.4. Subjects now arrive from all three providers — Open Library capped
+  at 40, Google Books' BISAC headings split into parts and capped at 20.
+- `googleVolumeInfo.MaturityRating` and `audnexusBook.IsAdult` are parsed and
+  unused; they are 8.4's age-suggestion inputs.
 - The EPUB parser produces no page count, but Open Library's
   `number_of_pages_median` now fills it where a provider is enabled, so an
   enriched EPUB lands in a length bucket. Without a provider the EPUBs still
@@ -82,8 +95,27 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
+- [2026-11-16] Phase 8.2: Google Books and Audnexus (uncommitted)
+  - Audnexus leads the registry: the only narrator source, and it declines
+    every ebook, so Open Library still leads for those
+  - Verified live: narrators, four chapters, and "english" folded to "en"
+  - Audnexus has no title search, so it is keyed on the ASIN alone — which
+    meant teaching `ParseM4B` to read the iTunes free-form atom, since no
+    parser produced one
+  - Google Books scopes its query with `intitle:`/`inauthor:` and splits BISAC
+    headings into parts, so the taxonomy gets three chances to map
+    "Fiction / Fantasy / Epic" rather than one string to miss on
+  - A shared quota is obeyed rather than counted: a 429 naming a *daily* quota
+    stops asking that provider until UTC midnight, while a per-minute rate
+    limit is still retried. Found live, where the keyless quota was already
+    exhausted by other callers
+  - Found and fixed, from Phase 4: the `©cmt` comment outranked the `ldes` long
+    description, so Red Rising's blurb was "Purchased from Libro.fm" — and the
+    atom read was dead code anyway, because go-mp4 cannot descend into an atom
+    it does not model
+  - 364 tests pass, race-clean
 - [2026-11-16] Phase 8.1: the provider contract, Open Library, caching and
-  rate limiting (uncommitted)
+  rate limiting (committed, 2e252df)
   - Every provider off until the config names it; an unknown name is a startup
     error rather than a provider that silently never runs
   - One `client` every provider goes out through: paced at two requests a
@@ -144,15 +176,17 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 8.2: Google Books and Audnexus.
+Phase 8.3: matching and correction — candidate ranking, Fix Match, and making
+a correction stick.
 
-What is ready: `provider.New` has one `switch` case per provider, so adding one
-is a constructor plus a `case`. The `client` already handles pacing, retries,
-caching and size limits, so a new provider is a URL builder and two response
-structs. `Query.Kind` and `Provider.Serves` exist so Audnexus is never asked
-about an EPUB, and `Query.WantChapters` is already set from whether the file
-had its own — which is the plan's rule that local `chpl` data wins.
+What is ready: `provider.Rank` already scores and orders every candidate
+including the ones below the threshold, which is exactly what Fix Match has to
+show. `Best` is the only caller that applies the threshold, so the manual path
+needs no new scoring. Field locking already works end to end and is pinned by
+`TestALockedFieldOutranksTheProvider`.
 
-Two things to settle in 8.2: Google Books' limit is a daily cap (1000 keyless)
-rather than a rate, so the interval-based limiter does not express it; and
-`config.Metadata.GoogleBooksKey` is parsed but not yet read by anything.
+What 8.3 has to add: a `provider_matches` table pinning an edition to a
+provider identity so a rescan re-fetches the chosen record instead of searching
+again, a `Candidate` DTO (it carries an unexported payload today, so it cannot
+be serialised as-is), and the handler itself. Applying a match must also set
+the lock bits, or the next scan undoes it.

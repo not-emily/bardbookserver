@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,10 @@ const attempts = 3
 // about.
 var errNotFound = errors.New("not found")
 
+// errQuotaExhausted is a third answer: the provider is working and has refused
+// us for the rest of the day. Retrying is pointless and rude.
+var errQuotaExhausted = errors.New("daily quota exhausted")
+
 // client is the only way out of this package. Every request is paced, cached,
 // retried and size-bounded here so no provider has to remember to be polite.
 type client struct {
@@ -36,6 +41,7 @@ type client struct {
 	http     *http.Client
 	cache    *Cache
 	limiter  *limiter
+	breaker  *breaker
 	logger   *slog.Logger
 }
 
@@ -59,6 +65,11 @@ func (c *client) get(ctx context.Context, url string) ([]byte, error) {
 		}
 		return body, nil
 	}
+	// After the cache, so a backfill that ran out of quota still serves
+	// everything it already asked for.
+	if c.breaker.open() {
+		return nil, errQuotaExhausted
+	}
 
 	status, body, err := c.fetch(ctx, url, maxBodyBytes)
 	if err != nil {
@@ -75,6 +86,10 @@ func (c *client) get(ctx context.Context, url string) ([]byte, error) {
 // getBytes is the cover path: artwork is not cached in the database, since the
 // cover cache already content-addresses what was kept.
 func (c *client) getBytes(ctx context.Context, url string) ([]byte, error) {
+	if c.breaker.open() {
+		return nil, errQuotaExhausted
+	}
+
 	status, body, err := c.fetch(ctx, url, maxCoverBytes)
 	if err != nil {
 		return nil, err
@@ -108,6 +123,8 @@ func (c *client) fetch(ctx context.Context, url string, limit int64) (int, []byt
 			return status, body, nil
 		case ctx.Err() != nil:
 			return 0, nil, ctx.Err()
+		case errors.Is(err, errQuotaExhausted):
+			return 0, nil, err
 		}
 
 		// The service's own answer wins over our schedule when it asks for
@@ -136,7 +153,21 @@ func (c *client) once(ctx context.Context, url string, limit int64) (int, []byte
 	defer resp.Body.Close()
 
 	switch {
-	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden:
+		// A rate limit is worth waiting out; a daily quota is not, and only the
+		// body says which this is.
+		refusal, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if isDailyQuota(refusal) {
+			c.breaker.trip()
+			c.logger.Warn("provider refused us for the rest of the day",
+				"provider", c.provider, "status", resp.Status)
+			return 0, nil, 0, fmt.Errorf("%s: %s: %w", url, resp.Status, errQuotaExhausted)
+		}
+		if resp.StatusCode == http.StatusForbidden {
+			return 0, nil, 0, fmt.Errorf("%s: %s", url, resp.Status)
+		}
+		return 0, nil, retryAfter(resp), fmt.Errorf("%s: %s", url, resp.Status)
+	case resp.StatusCode >= 500:
 		return 0, nil, retryAfter(resp), fmt.Errorf("%s: %s", url, resp.Status)
 	case resp.StatusCode == http.StatusNotFound:
 		return resp.StatusCode, nil, 0, nil
@@ -185,6 +216,51 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// isDailyQuota reads the refusal rather than guessing from the status, because
+// Google answers both a per-minute rate limit and a per-day quota with 429 and
+// only the body distinguishes them.
+func isDailyQuota(refusal []byte) bool {
+	body := strings.ToLower(string(refusal))
+	for _, marker := range []string{"per day", "dailylimitexceeded", "quotaexceeded"} {
+		if strings.Contains(body, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// breaker stops asking a provider that has refused us for the day. Google Books
+// states its limit as a thousand queries a day rather than a rate, and without
+// a key that quota is shared with every other anonymous caller — so a local
+// count could not track it, and the service's own refusal is the only reliable
+// signal. A nil breaker never trips, which is what a test gets.
+type breaker struct {
+	mu    sync.Mutex
+	until time.Time
+}
+
+func (b *breaker) open() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return time.Now().Before(b.until)
+}
+
+// trip holds until the next UTC midnight, which is when a daily quota resets.
+func (b *breaker) trip() {
+	if b == nil {
+		return
+	}
+	now := time.Now().UTC()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.until = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).
+		AddDate(0, 0, 1)
 }
 
 // politeInterval is the floor on how often one provider is asked anything: a

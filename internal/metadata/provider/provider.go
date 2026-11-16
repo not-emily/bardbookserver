@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/metadata"
@@ -96,10 +98,14 @@ func New(cfg config.Metadata, database *sql.DB, logger *slog.Logger) *Registry {
 	shared := &http.Client{Timeout: cfg.Timeout()}
 	cache := NewCache(database, logger)
 
+	// Audnexus leads because it is the only one that knows about narration, and
+	// it only ever answers an audiobook it was given an ASIN for — so for
+	// everything else Open Library still leads. Google Books fills the gaps the
+	// other two leave, which is usually the description.
 	for _, name := range []string{
+		config.ProviderAudnexus,
 		config.ProviderOpenLibrary,
 		config.ProviderGoogleBooks,
-		config.ProviderAudnexus,
 	} {
 		if !cfg.ProviderEnabled(name) {
 			continue
@@ -109,6 +115,10 @@ func New(cfg config.Metadata, database *sql.DB, logger *slog.Logger) *Registry {
 		switch name {
 		case config.ProviderOpenLibrary:
 			r.providers = append(r.providers, newOpenLibrary(c))
+		case config.ProviderGoogleBooks:
+			r.providers = append(r.providers, newGoogleBooks(c, cfg.GoogleBooksKey))
+		case config.ProviderAudnexus:
+			r.providers = append(r.providers, newAudnexus(c))
 		default:
 			// A name the config accepts but nothing implements yet. Saying so
 			// is the whole point of an explicit registry: enabling a provider
@@ -184,6 +194,20 @@ func lookupOne(ctx context.Context, p Provider, q Query) (metadata.Metadata, boo
 		return metadata.Metadata{}, false, err
 	}
 	return md, true, nil
+}
+
+// parsePosition reads a series position a provider writes as free text, such
+// as "1" or "Book 2". Anything with no number in it is no position.
+func parsePosition(v string) *float64 {
+	fields := strings.FieldsFunc(v, func(r rune) bool {
+		return !(r >= '0' && r <= '9') && r != '.'
+	})
+	for _, field := range fields {
+		if n, err := strconv.ParseFloat(field, 64); err == nil {
+			return &n
+		}
+	}
+	return nil
 }
 
 // QueryFor builds a lookup from everything known locally, which is both the

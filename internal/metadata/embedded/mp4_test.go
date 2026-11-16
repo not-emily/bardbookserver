@@ -154,6 +154,110 @@ func TestParseM4BWithoutChaptersOrTags(t *testing.T) {
 	}
 }
 
+// ilstBox wraps tag atoms the way a real file does: udta, then a meta box with
+// its own version word, then ilst.
+func ilstBox(children ...[]byte) []byte {
+	var items []byte
+	for _, child := range children {
+		items = append(items, child...)
+	}
+
+	meta := append([]byte{0, 0, 0, 0}, box("ilst", items)...)
+	return box("udta", box("meta", meta))
+}
+
+// freeFormBox is the layout Audible writes the ASIN in: a mean naming the
+// vendor, a name naming the field, and a data child carrying the value behind
+// its encoding and locale words.
+func freeFormBox(name, value string) []byte {
+	mean := box("mean", append([]byte{0, 0, 0, 0}, "com.apple.iTunes"...))
+	nameBox := box("name", append([]byte{0, 0, 0, 0}, name...))
+	data := box("data", append([]byte{0, 0, 0, 1, 0, 0, 0, 0}, value...))
+
+	return box("----", concat(mean, nameBox, data))
+}
+
+func textAtom(kind, value string) []byte {
+	return box(kind, box("data", append([]byte{0, 0, 0, 1, 0, 0, 0, 0}, value...)))
+}
+
+func concat(parts ...[]byte) []byte {
+	var out []byte
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
+}
+
+// Audnexus is keyed on the ASIN and has no title search, so a file that does
+// not yield one can never be enriched by it.
+func TestParseM4BReadsTheAudibleASIN(t *testing.T) {
+	path := writeM4B(t,
+		box("mvhd", mvhdPayload(1000, 60000)),
+		ilstBox(freeFormBox("ASIN", "B002V0QUOC")),
+	)
+
+	md, err := ParseM4B(path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if md.ASIN != "B002V0QUOC" {
+		t.Errorf("ASIN is %q, want B002V0QUOC", md.ASIN)
+	}
+}
+
+func TestParseM4BIgnoresAnotherVendorsFreeFormField(t *testing.T) {
+	path := writeM4B(t,
+		box("mvhd", mvhdPayload(1000, 60000)),
+		ilstBox(freeFormBox("CDEK", "not-an-asin-at-all")),
+	)
+
+	md, err := ParseM4B(path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if md.ASIN != "" {
+		t.Errorf("ASIN is %q, want none", md.ASIN)
+	}
+}
+
+// A store stamps its name into the comment, and that must not stand as the
+// book's description when the file carries a real one.
+func TestParseM4BPrefersTheLongDescriptionOverTheComment(t *testing.T) {
+	blurb := "Darrow is a Red, a member of the lowest caste."
+	path := writeM4B(t,
+		box("mvhd", mvhdPayload(1000, 60000)),
+		ilstBox(
+			textAtom("ldes", blurb),
+			textAtom("\xa9cmt", "Pierce Brown Purchased from Libro.fm."),
+		),
+	)
+
+	md, err := ParseM4B(path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if md.Description != blurb {
+		t.Errorf("description is %q, want the long description", md.Description)
+	}
+}
+
+// With no long description the comment is all there is, so it still stands.
+func TestParseM4BFallsBackToTheComment(t *testing.T) {
+	path := writeM4B(t,
+		box("mvhd", mvhdPayload(1000, 60000)),
+		ilstBox(textAtom("\xa9cmt", "The only description this file has.")),
+	)
+
+	md, err := ParseM4B(path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if md.Description != "The only description this file has." {
+		t.Errorf("description is %q", md.Description)
+	}
+}
+
 func TestSplitPeople(t *testing.T) {
 	cases := []struct {
 		in   string

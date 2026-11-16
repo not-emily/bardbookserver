@@ -36,6 +36,26 @@ func TestISBN13ConvertsTheTenDigitForm(t *testing.T) {
 	}
 }
 
+// A tool that wrote something else into the field must not send Audnexus
+// looking for it.
+func TestNormalizeASIN(t *testing.T) {
+	cases := map[string]string{
+		"B002V0QUOC":   "B002V0QUOC",
+		"b002v0quoc":   "B002V0QUOC",
+		" B002V0QUOC ": "B002V0QUOC",
+		"0441172717":   "",
+		"B002V0QUO":    "",
+		"B002V0QUOCX":  "",
+		"B002-V0QUO":   "",
+		"":             "",
+	}
+	for in, want := range cases {
+		if got := NormalizeASIN(in); got != want {
+			t.Errorf("NormalizeASIN(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestNormalizeLanguageFoldsThreeLetterCodes(t *testing.T) {
 	cases := map[string]string{
 		"en-GB": "en", "EN": "en", "eng": "en", "fra": "fr", "fre": "fr",

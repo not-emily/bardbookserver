@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -66,6 +68,94 @@ func TestLiveOpenLibraryAnswersByISBN(t *testing.T) {
 	}
 	if len(md.Subjects) > olMaxSubjects {
 		t.Errorf("%d subjects came back, want at most %d", len(md.Subjects), olMaxSubjects)
+	}
+}
+
+// Audnexus is the narrator source, and the only one. It is keyed on the ASIN
+// and has no title search, so this is also the check that the ASIN path works.
+func TestLiveAudnexusAnswersAnASIN(t *testing.T) {
+	liveOrSkip(t)
+
+	p := newAudnexus(&client{
+		provider: config.ProviderAudnexus,
+		http:     &http.Client{Timeout: 20 * time.Second},
+		logger:   discard(),
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	q := Query{
+		Title:        "Man's Search for Meaning",
+		ASIN:         "B002V0QUOC",
+		Kind:         model.KindAudiobook,
+		WantChapters: true,
+	}
+	candidates, err := p.Search(ctx, q)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	best, ok := Best(q, candidates)
+	if !ok {
+		t.Fatal("an ASIN lookup matched nothing")
+	}
+
+	md, err := p.Fetch(ctx, q, best)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	t.Logf("title=%q narrators=%v language=%q chapters=%d",
+		md.Title, md.Narrators, md.Language, len(md.Chapters))
+
+	if len(md.Narrators) == 0 {
+		t.Error("no narrator came back, which is the field Audnexus is here for")
+	}
+	if md.Language != "en" {
+		t.Errorf("language is %q, want \"en\" from Audnexus's \"english\"", md.Language)
+	}
+	if len(md.Chapters) == 0 {
+		t.Error("no chapters came back")
+	}
+	if md.DurationSeconds != nil {
+		t.Errorf("duration is %v; the file is the authority on that", md.DurationSeconds)
+	}
+}
+
+func TestLiveGoogleBooksAnswersByISBN(t *testing.T) {
+	liveOrSkip(t)
+
+	p := newGoogleBooks(&client{
+		provider: config.ProviderGoogleBooks,
+		http:     &http.Client{Timeout: 20 * time.Second},
+		logger:   discard(),
+	}, os.Getenv("BARD_GOOGLE_BOOKS_KEY"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	q := Query{Title: "The Hobbit", ISBN: "9780547952414", Kind: model.KindEbook}
+	candidates, err := p.Search(ctx, q)
+	if errors.Is(err, errQuotaExhausted) {
+		// Keyless, the daily quota is shared with every other anonymous
+		// caller, so it is routinely gone. Not our bug and not a failure.
+		t.Skipf("google books quota is exhausted: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	best, ok := Best(q, candidates)
+	if !ok {
+		t.Fatal("an ISBN lookup matched nothing")
+	}
+	md, err := p.Fetch(ctx, q, best)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	t.Logf("title=%q authors=%v subjects=%v", md.Title, md.Authors, md.Subjects)
+
+	if md.Description == "" {
+		t.Error("no description came back, which is what Google Books is best at")
 	}
 }
 

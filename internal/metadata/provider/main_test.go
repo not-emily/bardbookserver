@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,27 +39,40 @@ func testDB(t *testing.T) *db.DB {
 type stub struct {
 	*httptest.Server
 
-	mu   sync.Mutex
-	hits map[string]int
+	mu     sync.Mutex
+	hits   map[string]int
+	routes map[string]func(http.ResponseWriter, *http.Request)
 }
 
 func newStub(t *testing.T, routes map[string]func(http.ResponseWriter, *http.Request)) *stub {
 	t.Helper()
-	s := &stub{hits: map[string]int{}}
+	if routes == nil {
+		routes = map[string]func(http.ResponseWriter, *http.Request){}
+	}
+	s := &stub{hits: map[string]int{}, routes: routes}
 
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.hits[r.URL.Path]++
+		route, ok := s.routes[r.URL.Path]
 		s.mu.Unlock()
 
-		if route, ok := routes[r.URL.Path]; ok {
-			route(w, r)
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		w.WriteHeader(http.StatusNotFound)
+		route(w, r)
 	}))
 	t.Cleanup(s.Close)
 	return s
+}
+
+// handle adds a route after the server is up, which is how a response body can
+// name the stub's own address.
+func (s *stub) handle(path string, route func(http.ResponseWriter, *http.Request)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.routes[path] = route
 }
 
 func (s *stub) count(path string) int {
@@ -89,6 +103,11 @@ func status(code int) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(code) }
 }
 
+// replaceBase points a recorded response's absolute URLs at the stub.
+func replaceBase(body, base string) string {
+	return strings.ReplaceAll(body, "http://REPLACED", base)
+}
+
 // testClient paces at nothing: the limiter is tested on its own, and every
 // other test would otherwise pay half a second a request.
 func testClient(cache *Cache) *client {
@@ -101,11 +120,27 @@ func testClient(cache *Cache) *client {
 	}
 }
 
-// testOpenLibrary points the provider at a stub. The production constructor
-// keeps the real hosts, so there is no test-only seam in it.
+// testOpenLibrary points the provider at a stub. The production constructors
+// keep the real hosts, so there is no test-only seam in them.
 func testOpenLibrary(base string, cache *Cache) *openLibrary {
 	p := newOpenLibrary(testClient(cache))
 	p.base, p.covers = base, base
+	p.client.limiter = newLimiter(0)
+	return p
+}
+
+func testGoogleBooks(base, key string, cache *Cache) *googleBooks {
+	p := newGoogleBooks(testClient(cache), key)
+	p.base = base
+	p.client.provider = config.ProviderGoogleBooks
+	p.client.limiter = newLimiter(0)
+	return p
+}
+
+func testAudnexus(base string, cache *Cache) *audnexus {
+	p := newAudnexus(testClient(cache))
+	p.base = base
+	p.client.provider = config.ProviderAudnexus
 	p.client.limiter = newLimiter(0)
 	return p
 }

@@ -128,6 +128,56 @@ func TestAProviderOutranksThePathConvention(t *testing.T) {
 	}
 }
 
+// The narrator facet has existed since Phase 6 with no values in it, because
+// nothing Bard reads from a file fills narrators unless the file sets the
+// composer tag. This is the unblock.
+func TestAProviderFillsTheNarratorFacet(t *testing.T) {
+	root := tree(t, "Brown/Red Rising.m4b")
+	start := 0.0
+	p := &stubProvider{md: metadata.Metadata{
+		Title:     "Red Rising",
+		Authors:   []string{"Pierce Brown"},
+		Narrators: []string{"Tim Gerard Reynolds"},
+		Chapters: []metadata.Chapter{
+			{Title: "Chapter 1", StartSeconds: &start},
+		},
+	}}
+	s, d, sourceID := scannerWith(t, root, p)
+	mustScan(t, s, sourceID)
+
+	narrators := queryStrings(t, d, `
+		SELECT c.name FROM contributors c
+		  JOIN contributions n ON n.contributor_id = c.id
+		 WHERE n.role = 'narrator'`)
+	if len(narrators) != 1 || narrators[0] != "Tim Gerard Reynolds" {
+		t.Errorf("narrators are %v", narrators)
+	}
+
+	// A narrator belongs to the edition, not the book, since two narrations of
+	// one title are two editions.
+	var editionID *int64
+	if err := d.QueryRow(
+		`SELECT edition_id FROM contributions WHERE role = 'narrator'`).Scan(&editionID); err != nil {
+		t.Fatal(err)
+	}
+	if editionID == nil {
+		t.Error("the narrator was credited to the book rather than the edition")
+	}
+
+	if n := countRows(t, d, "chapters"); n != 1 {
+		t.Errorf("got %d chapters, want 1", n)
+	}
+
+	// The provider was asked for chapters because the fixture has none of its
+	// own, which is the condition the plan puts on using them.
+	if len(p.queries) != 1 || !p.queries[0].WantChapters {
+		t.Errorf("query is %+v, want chapters asked for", p.queries)
+	}
+	if p.queries[0].Kind != model.KindAudiobook {
+		t.Errorf("kind is %q, want audiobook", p.queries[0].Kind)
+	}
+}
+
 // Without this a refresh silently discards a correction, which trains the user
 // to stop making them.
 func TestALockedFieldOutranksTheProvider(t *testing.T) {

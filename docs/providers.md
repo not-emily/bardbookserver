@@ -17,6 +17,7 @@ metadata:
     openlibrary: true
     googlebooks: false
     audnexus: false
+  google_books_key: ""
   timeout_seconds: 10
 ```
 
@@ -25,20 +26,51 @@ silently never runs is worse than one that refuses to start.
 
 | Provider | Covers | Needs a key |
 |----------|--------|-------------|
+| `audnexus` | **Narrators**, chapter titles and timings, series, abridgement, audiobook descriptions and covers | No |
 | `openlibrary` | Titles, authors, descriptions, subjects, covers, page counts | No |
-| `googlebooks` | *(v1 phase 8.2)* | Optional |
-| `audnexus` | *(v1 phase 8.2)* | No |
+| `googlebooks` | Descriptions, BISAC categories, page counts, covers | Recommended |
 
 `timeout_seconds` bounds a single request. A provider that times out costs that
 book its enrichment and nothing else: the scan still succeeds on what the files
 said.
 
+The order in that table is the order they are consulted, and the first provider
+to know a field owns it. Audnexus leads because it is the only source of
+narrators, and it answers nothing but an audiobook — so for ebooks Open Library
+leads anyway, with Google Books filling what the others left empty.
+
+### Audnexus needs an ASIN
+
+Audnexus has no title search. It answers `/books/{asin}` and nothing else, so
+it can only enrich an audiobook whose file carries an Audible ASIN — which Bard
+reads from the iTunes free-form atom that Audible and AAX conversions write.
+
+**An audiobook from a DRM-free store carries no ASIN, so Audnexus cannot help
+it.** Libro.fm and Downpour files, for instance, have none. For those the
+narrator has to come from the file's composer tag or from a hand edit. Audnexus
+also serves one region at a time and answers `REGION_UNAVAILABLE` for titles
+outside it, which Bard treats as "no match" rather than as an error.
+
+### Google Books and its daily quota
+
+Google Books allows roughly 1000 queries a day. Without an API key that quota
+is **shared with every other anonymous caller**, so in practice it is often
+already exhausted — a lookup then comes back `429 Too Many Requests` saying
+"Queries per day".
+
+Bard cannot count a quota it shares, so it does not try. When a provider
+refuses for the day, Bard stops asking it until the next UTC midnight rather
+than retrying every remaining book. Set `google_books_key` to a key of your own
+if you want the provider to be dependable.
+
 ## What a provider is allowed to change
 
-The file wins on anything the file can measure — its own page count, its
-chapter marks and its embedded cover art. A provider is asked to fill only what
-is genuinely missing, so enabling one cannot replace a PDF's real page count
-with an estimate or an EPUB's own artwork with a scan of a different edition.
+The file wins on anything the file can measure — its own duration, page count,
+chapter marks and embedded cover art. A provider is asked to fill only what is
+genuinely missing, so enabling one cannot replace a PDF's real page count with
+an estimate, an EPUB's own artwork with a scan of a different edition, or an
+M4B's chapter marks with Audible's. Duration is never taken from a provider at
+all: the file that actually plays is the authority on how long it is.
 
 For bibliographic fields — title, author, description, publisher, subjects —
 the provider is preferred over the file, because file tags are frequently
@@ -82,6 +114,10 @@ recorded. To query the real services:
 ```sh
 BARD_LIVE_PROVIDERS=1 go test ./internal/metadata/provider/ -run Live -v
 ```
+
+Set `BARD_GOOGLE_BOOKS_KEY` as well to exercise Google Books with a key; the
+live Google Books test skips rather than fails when the shared quota is gone,
+since that is not a fault in Bard.
 
 These tests are skipped by default so the suite stays offline and a provider
 having a bad day is not a build failure.

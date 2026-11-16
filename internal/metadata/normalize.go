@@ -94,6 +94,29 @@ func NormalizeISBN(v string) string {
 	return s
 }
 
+// NormalizeASIN rejects anything that is not shaped like one, so a tool that
+// wrote a URL or a UUID into the field does not send Audnexus looking for it.
+// Amazon's identifiers are ten characters, and an audiobook's always begins
+// with a letter — a print title can be listed under its ISBN-10 instead, which
+// is deliberately refused here, since the only consumer serves audiobooks.
+func NormalizeASIN(v string) string {
+	s := strings.ToUpper(strings.TrimSpace(v))
+	if len(s) != 10 {
+		return ""
+	}
+	for i, r := range s {
+		digit := r >= '0' && r <= '9'
+		letter := r >= 'A' && r <= 'Z'
+		if !digit && !letter {
+			return ""
+		}
+		if i == 0 && !letter {
+			return ""
+		}
+	}
+	return s
+}
+
 // ISBN13 is the comparison form: a file commonly carries the 10-digit ISBN
 // where a provider returns the 13-digit one, and an identifier match is too
 // valuable to lose over which form each happened to use.

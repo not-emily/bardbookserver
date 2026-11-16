@@ -33,9 +33,15 @@ func ParseM4B(path string) (metadata.Metadata, error) {
 	if d := mp4Duration(f); d != nil {
 		md.DurationSeconds = d
 	}
-	if desc := mp4TextAtom(f, "desc", "ldes"); desc != "" && md.Description == "" {
+	// The long description outranks the comment, which is where tools stamp
+	// things like "Purchased from Libro.fm" — junk that would otherwise stand
+	// as the book's blurb.
+	if desc := mp4TextAtom(f, "ldes", "desc"); desc != "" {
 		md.Description = desc
 	}
+	// Audible writes the ASIN here, and it is the only thing Audnexus can be
+	// keyed on.
+	md.ASIN = metadata.NormalizeASIN(mp4FreeForm(f, "ASIN"))
 	md.Chapters = mp4Chapters(f)
 
 	return md, nil
@@ -155,20 +161,81 @@ func parseCHPL(p []byte) []metadata.Chapter {
 // description audiobooks carry.
 func mp4TextAtom(f *os.File, names ...string) string {
 	for _, name := range names {
-		boxes, err := mp4.ExtractBoxWithPayload(f, nil, mp4.BoxPath{
-			mp4.BoxTypeMoov(), mp4.BoxTypeUdta(), mp4.BoxTypeMeta(),
-			mp4.BoxTypeIlst(), mp4.StrToBoxType(name), mp4.BoxTypeData(),
-		})
-		if err != nil || len(boxes) == 0 {
-			continue
-		}
-		if data, ok := boxes[0].Payload.(*mp4.Data); ok {
-			if v := strings.TrimSpace(string(data.Data)); v != "" {
-				return v
+		for _, payload := range mp4Atoms(f, name) {
+			if _, value := mp4AtomFields(payload); value != "" {
+				return value
 			}
 		}
 	}
 	return ""
+}
+
+// mp4FreeForm reads an iTunes free-form atom: a `----` box holding a mean, a
+// name and a data child, where the name says which field it is.
+func mp4FreeForm(f *os.File, want string) string {
+	for _, payload := range mp4Atoms(f, "----") {
+		name, value := mp4AtomFields(payload)
+		if value != "" && strings.EqualFold(name, want) {
+			return value
+		}
+	}
+	return ""
+}
+
+// mp4Atoms returns the raw payload of each named atom under ilst. go-mp4 cannot
+// descend into an atom it does not model, which is most of them, so the
+// children are walked by hand.
+func mp4Atoms(f *os.File, name string) [][]byte {
+	boxes, err := mp4.ExtractBox(f, nil, mp4.BoxPath{
+		mp4.BoxTypeMoov(), mp4.BoxTypeUdta(), mp4.BoxTypeMeta(),
+		mp4.BoxTypeIlst(), mp4.StrToBoxType(name),
+	})
+	if err != nil {
+		return nil
+	}
+
+	out := make([][]byte, 0, len(boxes))
+	for _, bi := range boxes {
+		if bi.Size <= bi.HeaderSize {
+			continue
+		}
+		payload := make([]byte, bi.Size-bi.HeaderSize)
+		if _, err := f.ReadAt(payload, int64(bi.Offset+bi.HeaderSize)); err != nil {
+			continue
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+// atomDataHeader is the data box's own prefix: a type word naming the encoding,
+// then a locale word.
+const atomDataHeader = 8
+
+// mp4AtomFields pulls the name and the value out of an atom's children. A plain
+// text atom carries only a data child, so its name comes back empty.
+func mp4AtomFields(p []byte) (name, value string) {
+	for off := 0; off+8 <= len(p); {
+		size := int(binary.BigEndian.Uint32(p[off:]))
+		if size < 8 || off+size > len(p) {
+			return name, value
+		}
+		kind := string(p[off+4 : off+8])
+		body := p[off+8 : off+size]
+
+		switch kind {
+		case "name":
+			if len(body) > 4 {
+				name = string(body[4:])
+			}
+		case "data":
+			if len(body) > atomDataHeader {
+				value = strings.TrimSpace(string(body[atomDataHeader:]))
+			}
+		}
+		off += size
+	}
+	return name, value
 }
 
 func firstNonEmpty(values ...string) string {
