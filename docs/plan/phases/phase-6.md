@@ -18,19 +18,27 @@ Give clients an authenticated API to browse, filter, search, and stream the libr
 - Facet value endpoints for populating client filter UIs
 - `GET /api/v1/files/{id}/content` — range-request media delivery
 - `GET /api/v1/books/{id}/cover` — cached resized variants, ETag
-- `GET /api/v1/sync` — per-user manifest of what a device should pre-cache
 - `BookScope` applied to every multi-record path
+
+**Moved to Phase 7.2:** `GET /api/v1/sync`, and the reading-state and
+personal-rating facets. All three read user state Phase 7 creates; see the
+decision log.
 
 ## Files to Create
 
-- `internal/api/book_handlers.go`, `search_handlers.go`, `collection_handlers.go`
+- `internal/api/book_handlers.go`, `search_handlers.go`, `collection_handlers.go`,
+  `facet_handlers.go`
 - `internal/api/media_handlers.go` — range serving
-- `internal/api/sync_handlers.go`
 - `internal/api/dto.go` — response shapes
-- `internal/policy/book.go` — `BookPolicy` and `BookScope`
+- `internal/policy/book.go` — `BookScope` (`BookPolicy` lands with Phase 9's
+  age ladder)
+- `internal/policy/collection.go` — `CollectionScope`
+- `internal/db/browse.go`, `detail.go`, `facets.go`, `series.go`,
+  `collections.go`, `media.go` — the composed read queries
 - `internal/media/serve.go` — range, ETag, conditional requests
 - `internal/media/covervariants.go`
-- `internal/api/book_handlers_test.go`
+- `internal/api/book_handlers_test.go`, `search_handlers_test.go`,
+  `facet_handlers_test.go`, `media_handlers_test.go`
 
 ## Dependencies
 
@@ -46,21 +54,22 @@ Use `http.ServeContent` for media rather than hand-rolling range parsing — it 
 
 Facet filters compose onto the Phase 3 query builder alongside the scope, per Decision 8. Facet *counts* must respect the scope too, or a count leaks the existence of hidden books.
 
-The sync manifest is the whole server side of offline support, per Decision 15: active reads, next unread in any series the user is reading, and the saved shelf. Flat list of editions with file ids, sizes, and hashes. No server-side eviction, expiry, or caps.
-
 Response DTOs are explicit structs, not models serialized directly. Models carry fields clients must never see — token hashes nearby in the user case, `min_age` internals, source paths. Sending a filesystem path to a client leaks the server's layout.
 
-Cover variants are generated on first request and cached on disk, not pre-generated for 5000 books during a scan.
+Cover variants stay pre-generated at scan time, which is what Phase 4.3 already does; the read path picks the smallest cached width that covers the request. See the decision log.
 
 ## Validation
 
-- [ ] Listing, search, series, and collection endpoints all route through `BookScope`
-- [ ] A range request returns 206 with correct `Content-Range` and byte count
-- [ ] A full request returns 200 with the whole file
-- [ ] `If-None-Match` on a cover returns 304
-- [ ] Facet filters compose: format plus genre plus reading state in one query
-- [ ] Facet counts match the number of records the same filters return
-- [ ] Pagination is stable across pages with a filter applied
-- [ ] The sync manifest lists active reads and saved books with file sizes and hashes
-- [ ] No response contains a filesystem path
-- [ ] An unauthenticated request to any `/api/v1` path returns 401
+- [x] Listing, search, series, and collection endpoints all route through `BookScope`
+- [x] A range request returns 206 with correct `Content-Range` and byte count
+- [x] A full request returns 200 with the whole file
+- [x] `If-None-Match` on a cover returns 304
+- [x] Facet filters compose: format plus genre plus length in one query
+      (reading state arrives with Phase 7)
+- [x] Facet counts match the number of records the same filters return
+- [x] Pagination is stable across pages with a filter applied
+- [x] No response contains a filesystem path
+- [x] An unauthenticated request to any `/api/v1` path returns 401
+
+Moved to Phase 7.2 with the sync manifest: the manifest's own validation line,
+and reading state as a facet.

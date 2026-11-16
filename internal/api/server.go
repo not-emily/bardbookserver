@@ -12,6 +12,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/auth"
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
+	"github.com/not-emily/bardbookserver/internal/media"
 )
 
 const shutdownGrace = 15 * time.Second
@@ -20,6 +21,7 @@ type Server struct {
 	cfg     *config.Config
 	db      *db.DB
 	store   *auth.Store
+	covers  *media.Cache
 	logger  *slog.Logger
 	version string
 
@@ -32,6 +34,7 @@ func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version
 		cfg:          cfg,
 		db:           database,
 		store:        auth.NewStore(database.DB),
+		covers:       media.NewCache(cfg.CoverCacheDir()),
 		logger:       logger,
 		version:      version,
 		loginLimiter: auth.NewLimiter(loginAttempts, loginWindow),
@@ -50,6 +53,17 @@ func (s *Server) handler() http.Handler {
 	authed.HandleFunc("POST /api/v1/auth/switch", s.handleSwitchProfile)
 	authed.HandleFunc("GET /api/v1/devices", s.handleListDevices)
 	authed.HandleFunc("DELETE /api/v1/devices/{id}", s.handleRevokeDevice)
+	authed.HandleFunc("GET /api/v1/books", s.handleListBooks)
+	authed.HandleFunc("GET /api/v1/books/{id}", s.handleGetBook)
+	authed.HandleFunc("GET /api/v1/books/{id}/cover", s.handleBookCover)
+	authed.HandleFunc("GET /api/v1/files/{id}/content", s.handleFileContent)
+	authed.HandleFunc("GET /api/v1/search", s.handleSearch)
+	authed.HandleFunc("GET /api/v1/facets", s.handleListFacets)
+	authed.HandleFunc("GET /api/v1/facets/{name}", s.handleGetFacet)
+	authed.HandleFunc("GET /api/v1/series", s.handleListSeries)
+	authed.HandleFunc("GET /api/v1/series/{id}", s.handleGetSeries)
+	authed.HandleFunc("GET /api/v1/collections", s.handleListCollections)
+	authed.HandleFunc("GET /api/v1/collections/{id}", s.handleGetCollection)
 	authed.HandleFunc("GET /api/v1/groupings/uncertain", s.handleListUncertainGroupings)
 	authed.HandleFunc("POST /api/v1/editions/{id}/group", s.handleMergeEdition)
 	authed.HandleFunc("DELETE /api/v1/editions/{id}/group", s.handleSplitEdition)

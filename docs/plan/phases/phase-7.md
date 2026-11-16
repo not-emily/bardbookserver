@@ -20,13 +20,17 @@ Give every user a private space — progress, reading state, ratings, saved shel
 - User collections (reusing the Phase 3 table with `owner_id` set)
 - Annotations — highlights, notes, bookmarks — append-only with soft deletes and a sync cursor
 - Read-to-listen handoff: chapter matching plus proportional interpolation
+- `GET /api/v1/sync` — per-user manifest of what a device should pre-cache
+  (moved from Phase 6, whose deliverable it was: its content is all user state
+  this phase creates)
+- The reading-state and personal-rating facets, as entries in `db.bookFacets`
 
 ## Files to Create
 
 - `internal/db/migrations/0007_spaces.sql`
 - `internal/space/progress.go`, `state.go`, `shelf.go`, `annotations.go`
 - `internal/media/handoff.go` — chapter alignment and interpolation
-- `internal/api/space_handlers.go`, `annotation_handlers.go`
+- `internal/api/space_handlers.go`, `annotation_handlers.go`, `sync_handlers.go`
 - `internal/policy/annotation.go`
 - `internal/space/progress_test.go`, `internal/media/handoff_test.go`
 
@@ -58,7 +62,8 @@ Everything here is private, per the plan's "private spaces, shared library" prin
 
 ### 7.2: Shelf, ratings, history
 **Goal:** the manual half of a user's space.
-**Deliverables:** saved shelf, 1–5 ratings, finished-at history, user collections.
+**Deliverables:** saved shelf, 1–5 ratings, finished-at history, user collections,
+the sync manifest, and the reading-state and rating facets.
 
 ### 7.3: Annotations
 **Goal:** highlights, notes, and bookmarks that merge across offline devices.
@@ -80,3 +85,5 @@ Everything here is private, per the plan's "private spaces, shared library" prin
 - [ ] Handoff from 60% of ebook chapter 7 lands inside audiobook chapter 7
 - [ ] Mismatched chapter counts fall back to percentage without erroring
 - [ ] No endpoint returns another user's progress, ratings, or annotations — including for an admin
+- [ ] The sync manifest lists active reads and saved books with file sizes and hashes
+- [ ] The reading-state facet filters and counts through `BookScope` like every other

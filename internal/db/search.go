@@ -2,24 +2,57 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
+	"unicode"
 )
+
+// RankOrder sorts by FTS relevance. books_fts.rank is only bound when the
+// query came from NewSearchQuery.
+var RankOrder = []string{"books_fts.rank", BooksAlias + ".id"}
+
+// NewSearchQuery composes FTS onto the ordinary book query rather than
+// resolving ids separately, so a search runs through the same scope and
+// facets as a listing. Search is the classic restriction leak.
+func NewSearchQuery(match string) *Query {
+	return NewBookQuery().
+		Join("JOIN books_fts ON books_fts.rowid = "+BooksAlias+".id").
+		Where("books_fts MATCH ?", match)
+}
+
+// FTSMatch turns typed input into an FTS5 expression. Every word becomes a
+// quoted prefix term, so an apostrophe or a bare AND cannot be read as FTS
+// syntax or raise a parse error. An empty result means nothing to search for.
+func FTSMatch(input string) string {
+	words := strings.FieldsFunc(input, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+
+	terms := make([]string, 0, len(words))
+	for _, word := range words {
+		terms = append(terms, `"`+word+`"*`)
+	}
+	return strings.Join(terms, " ")
+}
+
+// Conn is satisfied by *sql.DB, *sql.Tx and *DB, so the scanner can keep an
+// index update inside the transaction that caused it.
+type Conn interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
 
 // ReindexBook is called by the scanner and by metadata refreshes rather than
 // run from a trigger, because authors and narrators reach a book through
 // joins that a trigger on books cannot observe.
-func (d *DB) ReindexBook(ctx context.Context, bookID int64) error {
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin reindex: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM books_fts WHERE rowid = ?`, bookID); err != nil {
+func ReindexBook(ctx context.Context, conn Conn, bookID int64) error {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM books_fts WHERE rowid = ?`, bookID); err != nil {
 		return fmt.Errorf("clear search row: %w", err)
 	}
 
-	_, err = tx.ExecContext(ctx, `
+	_, err := conn.ExecContext(ctx, `
 		INSERT INTO books_fts (rowid, title, subtitle, authors, narrators, series)
 		SELECT
 			b.id,
@@ -40,33 +73,15 @@ func (d *DB) ReindexBook(ctx context.Context, bookID int64) error {
 	if err != nil {
 		return fmt.Errorf("write search row: %w", err)
 	}
-
-	return tx.Commit()
+	return nil
 }
 
-func (d *DB) RemoveBookFromIndex(ctx context.Context, bookID int64) error {
-	_, err := d.ExecContext(ctx, `DELETE FROM books_fts WHERE rowid = ?`, bookID)
-	return err
-}
-
-func (d *DB) SearchBooks(ctx context.Context, query string, limit int) ([]int64, error) {
-	rows, err := d.QueryContext(ctx, `
-		SELECT rowid FROM books_fts
-		WHERE books_fts MATCH ?
-		ORDER BY rank
-		LIMIT ?`, query, limit)
-	if err != nil {
-		return nil, fmt.Errorf("search books: %w", err)
+// RemoveBookFromIndex matters because SQLite reuses rowids: a stale row would
+// hand its text to whichever book is created next.
+func RemoveBookFromIndex(ctx context.Context, conn Conn, bookID int64) error {
+	if _, err := conn.ExecContext(ctx,
+		`DELETE FROM books_fts WHERE rowid = ?`, bookID); err != nil {
+		return fmt.Errorf("remove book %d from search index: %w", bookID, err)
 	}
-	defer rows.Close()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return nil
 }

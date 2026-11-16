@@ -367,7 +367,7 @@ func TestManualMergeSurvivesADatabaseRebuild(t *testing.T) {
 		`SELECT book_id FROM editions WHERE id = (SELECT MIN(id) FROM editions)`).Scan(&targetBook); err != nil {
 		t.Fatal(err)
 	}
-	if err := grouping.Merge(ctx, d.DB, editionID, targetBook); err != nil {
+	if _, err := grouping.Merge(ctx, d.DB, editionID, targetBook); err != nil {
 		t.Fatal(err)
 	}
 	if n := countRows(t, d, "books"); n != 1 {
@@ -420,13 +420,13 @@ func TestMergeRefusesTheBookItIsAlreadyOn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := grouping.Merge(ctx, d.DB, editionID, bookID); err == nil {
+	if _, err := grouping.Merge(ctx, d.DB, editionID, bookID); err == nil {
 		t.Error("merging an edition onto its own book succeeded")
 	}
-	if err := grouping.Merge(ctx, d.DB, editionID, 99999); err == nil {
+	if _, err := grouping.Merge(ctx, d.DB, editionID, 99999); err == nil {
 		t.Error("merging onto a nonexistent book succeeded")
 	}
-	if err := grouping.Merge(ctx, d.DB, 99999, bookID); err == nil {
+	if _, err := grouping.Merge(ctx, d.DB, 99999, bookID); err == nil {
 		t.Error("merging a nonexistent edition succeeded")
 	}
 }

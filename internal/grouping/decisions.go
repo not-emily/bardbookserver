@@ -164,15 +164,28 @@ func SetGroup(ctx context.Context, conn db, editionID int64, editionKey, groupKe
 
 // ReapEditionlessBooks clears out books nobody can read: an editionless book
 // denies for a restricted account and has no business in a listing.
-func ReapEditionlessBooks(ctx context.Context, conn db) (int, error) {
-	res, err := conn.ExecContext(ctx, `
+//
+// The ids come back because the caller has to drop them from the search index
+// too, and SQLite reuses rowids.
+func ReapEditionlessBooks(ctx context.Context, conn db) ([]int64, error) {
+	rows, err := conn.QueryContext(ctx, `
 		DELETE FROM books
-		 WHERE NOT EXISTS (SELECT 1 FROM editions e WHERE e.book_id = books.id)`)
+		 WHERE NOT EXISTS (SELECT 1 FROM editions e WHERE e.book_id = books.id)
+		 RETURNING id`)
 	if err != nil {
-		return 0, fmt.Errorf("reap editionless books: %w", err)
+		return nil, fmt.Errorf("reap editionless books: %w", err)
 	}
-	n, err := res.RowsAffected()
-	return int(n), err
+	defer rows.Close()
+
+	var reaped []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan reaped book: %w", err)
+		}
+		reaped = append(reaped, id)
+	}
+	return reaped, rows.Err()
 }
 
 type Uncertain struct {

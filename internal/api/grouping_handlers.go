@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/grouping"
 	"github.com/not-emily/bardbookserver/internal/policy"
 )
@@ -81,7 +82,8 @@ func (s *Server) handleMergeEdition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch err := grouping.Merge(r.Context(), s.db.DB, editionID, req.BookID); {
+	outcome, err := grouping.Merge(r.Context(), s.db.DB, editionID, req.BookID)
+	switch {
 	case errors.Is(err, grouping.ErrEditionNotFound):
 		writeError(w, http.StatusNotFound, "no such edition")
 	case errors.Is(err, grouping.ErrBookNotFound):
@@ -92,7 +94,9 @@ func (s *Server) handleMergeEdition(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("merge edition", "edition", editionID, "book", req.BookID, "error", err)
 		writeError(w, http.StatusInternalServerError, "could not merge the edition")
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"edition_id": editionID, "book_id": req.BookID})
+		s.refreshIndex(r, outcome)
+		writeJSON(w, http.StatusOK,
+			map[string]any{"edition_id": editionID, "book_id": outcome.BookID})
 	}
 }
 
@@ -107,7 +111,7 @@ func (s *Server) handleSplitEdition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bookID, err := grouping.Split(r.Context(), s.db.DB, editionID)
+	outcome, err := grouping.Split(r.Context(), s.db.DB, editionID)
 	switch {
 	case errors.Is(err, grouping.ErrEditionNotFound):
 		writeError(w, http.StatusNotFound, "no such edition")
@@ -117,7 +121,25 @@ func (s *Server) handleSplitEdition(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("split edition", "edition", editionID, "error", err)
 		writeError(w, http.StatusInternalServerError, "could not split the edition")
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"edition_id": editionID, "book_id": bookID})
+		s.refreshIndex(r, outcome)
+		writeJSON(w, http.StatusOK,
+			map[string]any{"edition_id": editionID, "book_id": outcome.BookID})
+	}
+}
+
+// refreshIndex runs after the regrouping has committed, so a failure here
+// leaves a stale search row rather than undoing the decision. A rescan
+// rebuilds it.
+func (s *Server) refreshIndex(r *http.Request, outcome grouping.Outcome) {
+	for _, bookID := range outcome.Removed {
+		if err := db.RemoveBookFromIndex(r.Context(), s.db, bookID); err != nil {
+			s.logger.Error("remove book from search index", "book", bookID, "error", err)
+		}
+	}
+	for _, bookID := range outcome.Reindex {
+		if err := db.ReindexBook(r.Context(), s.db, bookID); err != nil {
+			s.logger.Error("reindex book", "book", bookID, "error", err)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/grouping"
 	"github.com/not-emily/bardbookserver/internal/jobs"
 	"github.com/not-emily/bardbookserver/internal/media"
@@ -363,6 +364,7 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 	}
 
 	if changed {
+		vacated := ref.book
 		if editionID != 0 {
 			if err := regroup(ctx, tx, &ref, spot, res); err != nil {
 				return err
@@ -375,6 +377,17 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 		locks, err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations, res)
 		if err != nil {
 			return err
+		}
+
+		// In the same transaction as the metadata, so a scan interrupted here
+		// cannot leave a book indexed under its old title.
+		if err := db.ReindexBook(ctx, tx, ref.book); err != nil {
+			return err
+		}
+		if vacated != 0 && vacated != ref.book {
+			if err := db.ReindexBook(ctx, tx, vacated); err != nil {
+				return err
+			}
 		}
 
 		out := sidecar.FromMetadata(md, locks)
@@ -644,6 +657,8 @@ func (s *Scanner) sweep(ctx context.Context, state *sourceState, res *Result) er
 		res.FilesRemoved++
 	}
 
+	// A book that lost an edition lost its formats and narrators with it.
+	bereft := map[int64]bool{}
 	for editionID := range touched {
 		var remaining int
 		if err := tx.QueryRowContext(ctx,
@@ -653,10 +668,16 @@ func (s *Scanner) sweep(ctx context.Context, state *sourceState, res *Result) er
 		if remaining > 0 {
 			continue
 		}
+
+		bookID, err := bookOf(ctx, tx, editionID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM editions WHERE id = ?`, editionID); err != nil {
 			return fmt.Errorf("delete edition %d: %w", editionID, err)
 		}
 		delete(state.editions, editionID)
+		bereft[bookID] = true
 		res.EditionsRemoved++
 	}
 
@@ -666,7 +687,19 @@ func (s *Scanner) sweep(ctx context.Context, state *sourceState, res *Result) er
 	if err != nil {
 		return err
 	}
-	res.BooksReaped = reaped
+	res.BooksReaped = len(reaped)
+
+	for _, bookID := range reaped {
+		delete(bereft, bookID)
+		if err := db.RemoveBookFromIndex(ctx, tx, bookID); err != nil {
+			return err
+		}
+	}
+	for bookID := range bereft {
+		if err := db.ReindexBook(ctx, tx, bookID); err != nil {
+			return err
+		}
+	}
 
 	return tx.Commit()
 }

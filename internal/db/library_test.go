@@ -164,25 +164,45 @@ func TestLibraryFixtures(t *testing.T) {
 		t.Errorf("edition-level role = %q, want narrator", role)
 	}
 
-	if err := d.ReindexBook(ctx, bookID); err != nil {
+	if err := ReindexBook(ctx, d, bookID); err != nil {
 		t.Fatalf("reindex: %v", err)
 	}
 
-	for _, q := range []string{"sorcerer", "rowling", "dale", "potter"} {
-		ids, err := d.SearchBooks(ctx, q, 10)
-		if err != nil {
-			t.Fatalf("search %q: %v", q, err)
-		}
+	for _, term := range []string{"sorcerer", "rowling", "dale", "potter"} {
+		ids := searchIDs(t, d, term)
 		if len(ids) != 1 || ids[0] != bookID {
-			t.Errorf("search %q returned %v, want [%d]", q, ids, bookID)
+			t.Errorf("search %q returned %v, want [%d]", term, ids, bookID)
 		}
 	}
 
-	if ids, err := d.SearchBooks(ctx, "dune", 10); err != nil {
-		t.Fatal(err)
-	} else if len(ids) != 0 {
+	if ids := searchIDs(t, d, "dune"); len(ids) != 0 {
 		t.Errorf("search for an absent title returned %v", ids)
 	}
+
+	if err := RemoveBookFromIndex(ctx, d, bookID); err != nil {
+		t.Fatalf("remove from index: %v", err)
+	}
+	if ids := searchIDs(t, d, "potter"); len(ids) != 0 {
+		t.Errorf("a removed book is still indexed: %v", ids)
+	}
+}
+
+// searchIDs goes through the composed search query the API uses, so the test
+// covers the path that actually serves requests.
+func searchIDs(t *testing.T, d *DB, term string) []int64 {
+	t.Helper()
+
+	q := NewSearchQuery(FTSMatch(term)).OrderBy(RankOrder...)
+	rows, err := d.Books(context.Background(), q)
+	if err != nil {
+		t.Fatalf("search %q: %v", term, err)
+	}
+
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
 }
 
 func TestContributionMustAttachToExactlyOneLevel(t *testing.T) {

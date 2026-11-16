@@ -138,6 +138,20 @@ func (q *Query) SQL() (string, []any) {
 	return b.String(), args
 }
 
+// IDsSQL reduces a composed query to the ids it selects, so a facet count can
+// use it as a subquery and inherit every filter and the scope.
+func (q *Query) IDsSQL(col string) (string, []any) {
+	c := q.Clone()
+	c.cols = nil
+	c.colArgs = nil
+	c.orders = nil
+	c.limit = -1
+	c.offset = -1
+
+	c.Select(col)
+	return c.SQL()
+}
+
 // CountSQL drops result columns, ordering and pagination, keeping every filter.
 func (q *Query) CountSQL() (string, []any) {
 	c := q.Clone()

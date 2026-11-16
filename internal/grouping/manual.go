@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 var (
@@ -40,56 +41,75 @@ func EditionKeyFor(ctx context.Context, conn db, editionID int64) (string, error
 	return EditionKey(identifier, RelativeKey(sourcePath, filePath.String)), nil
 }
 
+// Outcome names what a manual decision changed, so the caller can bring the
+// search index back in line without reindexing the library.
+type Outcome struct {
+	// BookID is the book the edition now sits on.
+	BookID int64
+	// Reindex lists books whose search text changed and that still exist.
+	Reindex []int64
+	// Removed lists books the decision left with no editions.
+	Removed []int64
+}
+
 // Merge pins the target's existing editions into the group too, or a rebuild
 // would reassemble that book by matcher and leave the result to luck.
-func Merge(ctx context.Context, conn db, editionID, targetBookID int64) error {
+func Merge(ctx context.Context, conn db, editionID, targetBookID int64) (Outcome, error) {
 	var currentBook int64
 	err := conn.QueryRowContext(ctx,
 		`SELECT book_id FROM editions WHERE id = ?`, editionID).Scan(&currentBook)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrEditionNotFound
+		return Outcome{}, ErrEditionNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("read edition %d: %w", editionID, err)
+		return Outcome{}, fmt.Errorf("read edition %d: %w", editionID, err)
 	}
 	if currentBook == targetBookID {
-		return ErrSameBook
+		return Outcome{}, ErrSameBook
 	}
 
 	var exists int
 	if err := conn.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM books WHERE id = ?`, targetBookID).Scan(&exists); err != nil {
-		return fmt.Errorf("read book %d: %w", targetBookID, err)
+		return Outcome{}, fmt.Errorf("read book %d: %w", targetBookID, err)
 	}
 	if exists == 0 {
-		return ErrBookNotFound
+		return Outcome{}, ErrBookNotFound
 	}
 
 	groupKey, err := groupOfBook(ctx, conn, targetBookID)
 	if err != nil {
-		return err
+		return Outcome{}, err
 	}
 
 	if err := pinBook(ctx, conn, targetBookID, groupKey); err != nil {
-		return err
+		return Outcome{}, err
 	}
 
 	if _, err := conn.ExecContext(ctx,
 		`UPDATE editions SET book_id = ?, updated_at = datetime('now') WHERE id = ?`,
 		targetBookID, editionID); err != nil {
-		return fmt.Errorf("move edition %d to book %d: %w", editionID, targetBookID, err)
+		return Outcome{}, fmt.Errorf("move edition %d to book %d: %w", editionID, targetBookID, err)
 	}
 	if err := pinEdition(ctx, conn, editionID, groupKey); err != nil {
-		return err
+		return Outcome{}, err
 	}
 
-	_, err = ReapEditionlessBooks(ctx, conn)
-	return err
+	reaped, err := ReapEditionlessBooks(ctx, conn)
+	if err != nil {
+		return Outcome{}, err
+	}
+
+	out := Outcome{BookID: targetBookID, Reindex: []int64{targetBookID}, Removed: reaped}
+	if !slices.Contains(reaped, currentBook) {
+		out.Reindex = append(out.Reindex, currentBook)
+	}
+	return out, nil
 }
 
 // Split copies the title it is leaving, since that is what made the two look
 // alike in the first place.
-func Split(ctx context.Context, conn db, editionID int64) (int64, error) {
+func Split(ctx context.Context, conn db, editionID int64) (Outcome, error) {
 	var (
 		currentBook int64
 		title       string
@@ -101,60 +121,67 @@ func Split(ctx context.Context, conn db, editionID int64) (int64, error) {
 		  FROM editions e JOIN books b ON b.id = e.book_id
 		 WHERE e.id = ?`, editionID).Scan(&currentBook, &title, &sortTitle, &matchKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrEditionNotFound
+		return Outcome{}, ErrEditionNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read edition %d: %w", editionID, err)
+		return Outcome{}, fmt.Errorf("read edition %d: %w", editionID, err)
 	}
 
 	var siblings int
 	if err := conn.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM editions WHERE book_id = ? AND id != ?`,
 		currentBook, editionID).Scan(&siblings); err != nil {
-		return 0, fmt.Errorf("count siblings of edition %d: %w", editionID, err)
+		return Outcome{}, fmt.Errorf("count siblings of edition %d: %w", editionID, err)
 	}
 	if siblings == 0 {
-		return 0, ErrOnlyEdition
+		return Outcome{}, ErrOnlyEdition
 	}
 
 	out, err := conn.ExecContext(ctx,
 		`INSERT INTO books (title, sort_title, match_key) VALUES (?, ?, ?)`,
 		title, sortTitle, matchKey)
 	if err != nil {
-		return 0, fmt.Errorf("create book for split edition %d: %w", editionID, err)
+		return Outcome{}, fmt.Errorf("create book for split edition %d: %w", editionID, err)
 	}
 	bookID, err := out.LastInsertId()
 	if err != nil {
-		return 0, err
+		return Outcome{}, err
 	}
 
 	groupKey, err := NewGroupKey()
 	if err != nil {
-		return 0, err
+		return Outcome{}, err
 	}
 
 	if _, err := conn.ExecContext(ctx,
 		`UPDATE editions SET book_id = ?, updated_at = datetime('now') WHERE id = ?`,
 		bookID, editionID); err != nil {
-		return 0, fmt.Errorf("move edition %d to its own book: %w", editionID, err)
+		return Outcome{}, fmt.Errorf("move edition %d to its own book: %w", editionID, err)
 	}
 	if err := pinEdition(ctx, conn, editionID, groupKey); err != nil {
-		return 0, err
+		return Outcome{}, err
 	}
 
 	// Pinned too, or the matcher pulls the split edition back next rebuild.
 	remaining, err := groupOfBook(ctx, conn, currentBook)
 	if err != nil {
-		return 0, err
+		return Outcome{}, err
 	}
 	if err := pinBook(ctx, conn, currentBook, remaining); err != nil {
-		return 0, err
+		return Outcome{}, err
 	}
 
-	if _, err := ReapEditionlessBooks(ctx, conn); err != nil {
-		return 0, err
+	reaped, err := ReapEditionlessBooks(ctx, conn)
+	if err != nil {
+		return Outcome{}, err
 	}
-	return bookID, nil
+
+	// currentBook kept at least one sibling, so it cannot have been reaped.
+	return Outcome{
+		BookID:  bookID,
+		Reindex: []int64{bookID, currentBook},
+		Removed: reaped,
+	}, nil
 }
 
 func groupOfBook(ctx context.Context, conn db, bookID int64) (string, error) {
