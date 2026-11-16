@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/not-emily/bardbookserver/internal/model"
 )
 
 var ErrNotFound = errors.New("db: not found")
@@ -66,11 +68,26 @@ type BookRow struct {
 	// MinConfidence is the weakest grouping among the book's editions, so a
 	// client can mark a guess as one.
 	MinConfidence *float64
+
+	ReadingState    model.ReadingState
+	FurthestPercent *float64
+	Saved           bool
+	Rating          *int
+}
+
+// bookColumns ends with the per-account columns, so a listing carries the
+// reader's own state without a second query.
+func bookColumns(userID int64) string {
+	return sharedBookColumns +
+		`, ` + ReadingStateSQL(BooksAlias, userID) + ` AS reading_state` +
+		`, ` + FurthestPercentSQL(BooksAlias, userID) + ` AS furthest_percent` +
+		`, ` + savedSQL(BooksAlias, userID) + ` AS saved` +
+		`, ` + ratingSQL(BooksAlias, userID) + ` AS rating`
 }
 
 // group_concat takes no ORDER BY in the SQLite builds we support, so each
 // aggregate wraps an already-ordered subquery.
-const bookColumns = `
+const sharedBookColumns = `
 	b.id, b.title, COALESCE(b.subtitle, ''), b.sort_title,
 	COALESCE(b.description, ''), b.series_id, COALESCE(sr.name, ''),
 	b.series_position, b.created_at,
@@ -111,8 +128,8 @@ const bookColumns = `
 	(SELECT MIN(e.match_confidence) FROM editions e WHERE e.book_id = b.id) AS min_confidence`
 
 // Books leaves the caller's query untouched so it can still be counted.
-func (d *DB) Books(ctx context.Context, q *Query) ([]BookRow, error) {
-	query, args := q.Clone().Select(bookColumns).SQL()
+func (d *DB) Books(ctx context.Context, q *Query, userID int64) ([]BookRow, error) {
+	query, args := q.Clone().Select(bookColumns(userID)).SQL()
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -133,8 +150,8 @@ func (d *DB) Books(ctx context.Context, q *Query) ([]BookRow, error) {
 
 // Book reads one book through a query already narrowed to its id, so the
 // scope decides whether it exists for this account.
-func (d *DB) Book(ctx context.Context, q *Query) (*BookRow, error) {
-	query, args := q.Clone().Select(bookColumns).Limit(1).SQL()
+func (d *DB) Book(ctx context.Context, q *Query, userID int64) (*BookRow, error) {
+	query, args := q.Clone().Select(bookColumns(userID)).Limit(1).SQL()
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -169,6 +186,9 @@ func scanBookRow(rows *sql.Rows) (*BookRow, error) {
 		pageCount                                     sql.NullInt64
 		createdAt                                     string
 		authors, narrators, formats, kinds, languages string
+		readingState, saved                           string
+		furthest                                      sql.NullFloat64
+		rating                                        sql.NullInt64
 	)
 
 	if err := rows.Scan(
@@ -176,9 +196,20 @@ func scanBookRow(rows *sql.Rows) (*BookRow, error) {
 		&seriesID, &row.SeriesName, &seriesPosition, &createdAt,
 		&authors, &row.AuthorSort, &narrators, &formats, &kinds, &languages,
 		&row.CoverHash, &row.EditionCount, &duration, &pageCount,
-		&row.PublishedOn, &confidence,
+		&row.PublishedOn, &confidence, &readingState, &furthest,
+		&saved, &rating,
 	); err != nil {
 		return nil, fmt.Errorf("scan book: %w", err)
+	}
+
+	row.ReadingState = model.ReadingState(readingState)
+	if furthest.Valid {
+		row.FurthestPercent = &furthest.Float64
+	}
+	row.Saved = saved == "true"
+	if rating.Valid {
+		n := int(rating.Int64)
+		row.Rating = &n
 	}
 
 	if seriesID.Valid {
@@ -228,19 +259,29 @@ func parseStamp(value string) time.Time {
 
 const DefaultBookSort = "title"
 
-// Every sort ends on b.id, or a page boundary shuffles between requests.
-var bookSorts = map[string][]string{
-	"title":     {"b.sort_title COLLATE NOCASE", "b.id"},
-	"author":    {"author_sort COLLATE NOCASE", "b.sort_title COLLATE NOCASE", "b.id"},
-	"added":     {"b.created_at DESC", "b.id DESC"},
-	"published": {"published_on DESC", "b.sort_title COLLATE NOCASE", "b.id"},
-	"length":    {LengthSeconds + " DESC", "b.id"},
-	"series":    {"sr.sort_name", "b.series_position", "b.id"},
+// Every sort ends on b.id, or a page boundary shuffles between requests. Some
+// of them order on the reader's own state, which is why this takes a user.
+func bookSorts(userID int64) map[string][]string {
+	return map[string][]string{
+		"title":     {"b.sort_title COLLATE NOCASE", "b.id"},
+		"author":    {"author_sort COLLATE NOCASE", "b.sort_title COLLATE NOCASE", "b.id"},
+		"added":     {"b.created_at DESC", "b.id DESC"},
+		"published": {"published_on DESC", "b.sort_title COLLATE NOCASE", "b.id"},
+		"length":    {LengthSeconds + " DESC", "b.id"},
+		"series":    {"sr.sort_name", "b.series_position", "b.id"},
+
+		// Furthest along first, with everything untouched below it.
+		"reading": {"furthest_percent IS NULL", "furthest_percent DESC", "b.id"},
+
+		// Most recently shelved first, which is the order a shelf reads in.
+		"saved":  {savedAtSQL(BooksAlias, userID) + " DESC", "b.id"},
+		"rating": {"rating IS NULL", "rating DESC", "b.sort_title COLLATE NOCASE", "b.id"},
+	}
 }
 
 // ApplyBookSort reports an unknown name rather than silently reordering.
-func ApplyBookSort(q *Query, name string) (*Query, bool) {
-	exprs, ok := bookSorts[name]
+func ApplyBookSort(q *Query, name string, userID int64) (*Query, bool) {
+	exprs, ok := bookSorts(userID)[name]
 	if !ok {
 		return q, false
 	}
@@ -248,8 +289,9 @@ func ApplyBookSort(q *Query, name string) (*Query, bool) {
 }
 
 func BookSortNames() []string {
-	out := make([]string, 0, len(bookSorts))
-	for name := range bookSorts {
+	all := bookSorts(0)
+	out := make([]string, 0, len(all))
+	for name := range all {
 		out = append(out, name)
 	}
 	sort.Strings(out)

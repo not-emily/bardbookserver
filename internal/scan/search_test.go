@@ -13,8 +13,9 @@ import (
 func searchTitles(t *testing.T, d *db.DB, term string) []string {
 	t.Helper()
 
+	// User 0 exists in no library, so the per-account columns come back empty.
 	rows, err := d.Books(context.Background(),
-		db.NewSearchQuery(db.FTSMatch(term)).OrderBy(db.RankOrder...))
+		db.NewSearchQuery(db.FTSMatch(term)).OrderBy(db.RankOrder...), 0)
 	if err != nil {
 		t.Fatalf("search %q: %v", term, err)
 	}

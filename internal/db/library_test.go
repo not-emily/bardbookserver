@@ -22,6 +22,10 @@ func openTestDB(t *testing.T) *DB {
 
 func ptr[T any](v T) *T { return &v }
 
+// noReader stands in where a test is about the library rather than anyone's
+// space; no user has this id, so every per-account column comes back empty.
+const noReader int64 = 0
+
 func mustExec(t *testing.T, d *DB, query string, args ...any) int64 {
 	t.Helper()
 	res, err := d.ExecContext(context.Background(), query, args...)
@@ -193,7 +197,7 @@ func searchIDs(t *testing.T, d *DB, term string) []int64 {
 	t.Helper()
 
 	q := NewSearchQuery(FTSMatch(term)).OrderBy(RankOrder...)
-	rows, err := d.Books(context.Background(), q)
+	rows, err := d.Books(context.Background(), q, noReader)
 	if err != nil {
 		t.Fatalf("search %q: %v", term, err)
 	}

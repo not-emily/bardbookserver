@@ -33,6 +33,11 @@ type bookDTO struct {
 	HasCover          bool          `json:"has_cover"`
 	UncertainGrouping bool          `json:"uncertain_grouping,omitempty"`
 	AddedAt           string        `json:"added_at"`
+
+	ReadingState string   `json:"reading_state"`
+	Percent      *float64 `json:"percent,omitempty"`
+	Saved        bool     `json:"saved"`
+	Rating       *int     `json:"rating,omitempty"`
 }
 
 // newBookDTO is explicit rather than a serialized model: a book row carries
@@ -55,6 +60,10 @@ func newBookDTO(row *db.BookRow) bookDTO {
 		HasCover:          row.CoverHash != "",
 		UncertainGrouping: uncertain(row.MinConfidence),
 		AddedAt:           stamp(row.CreatedAt),
+		ReadingState:      string(row.ReadingState),
+		Percent:           row.FurthestPercent,
+		Saved:             row.Saved,
+		Rating:            row.Rating,
 	}
 	if row.SeriesID != nil {
 		dto.Series = &seriesRefDTO{
@@ -153,7 +162,7 @@ func newEditionDTO(e *db.EditionDetail) editionDTO {
 			SizeBytes:       f.SizeBytes,
 			DurationSeconds: f.DurationSeconds,
 			ETag:            media.FileETag(f.ID, f.SizeBytes, f.ModifiedAt, f.ContentHash),
-			ContentURL:      fmt.Sprintf("/api/v1/files/%d/content", f.ID),
+			ContentURL:      contentURL(f.ID),
 		})
 	}
 	for _, c := range e.Chapters {
@@ -171,6 +180,10 @@ func newEditionDTO(e *db.EditionDetail) editionDTO {
 // than present two editions as a settled fact.
 func uncertain(confidence *float64) bool {
 	return confidence != nil && *confidence < grouping.CertainEnough
+}
+
+func contentURL(fileID int64) string {
+	return fmt.Sprintf("/api/v1/files/%d/content", fileID)
 }
 
 func orEmpty(v []string) []string {

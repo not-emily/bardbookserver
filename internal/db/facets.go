@@ -18,12 +18,14 @@ type FacetValue struct {
 	Count int
 }
 
+// userID reaches both halves because a facet may be about the reader rather
+// than the book: reading state and personal rating live in their space.
 type facet struct {
-	where func(values []string) (string, []any)
+	where func(userID int64, values []string) (string, []any)
 
 	// list counts the facet's values over an already-scoped set of book ids,
 	// yielding value, label and count.
-	list func(bookIDs string, args []any) (string, []any)
+	list func(userID int64, bookIDs string, args []any) (string, []any)
 }
 
 // reservedParams are listing controls rather than facets, so an unknown
@@ -46,13 +48,13 @@ var bookFacets = map[string]facet{
 	"language": editionColumnFacet("language"),
 
 	"genre": {
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			return `EXISTS (SELECT 1 FROM book_genres bg
 			          JOIN genres g ON g.id = bg.genre_id
 			         WHERE bg.book_id = ` + BooksAlias + `.id
 			           AND g.slug IN (` + inList(len(values)) + `))`, anyOf(values)
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT g.slug, g.name, COUNT(DISTINCT bg.book_id)
 			          FROM book_genres bg JOIN genres g ON g.id = bg.genre_id
 			         WHERE bg.book_id IN (` + bookIDs + `)
@@ -61,12 +63,12 @@ var bookFacets = map[string]facet{
 	},
 
 	"author": {
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			return `EXISTS (SELECT 1 FROM contributions ct
 			         WHERE ct.book_id = ` + BooksAlias + `.id AND ct.role = 'author'
 			           AND ct.contributor_id IN (` + inList(len(values)) + `))`, anyOf(values)
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT CAST(c.id AS TEXT), c.name, COUNT(DISTINCT ct.book_id)
 			          FROM contributions ct JOIN contributors c ON c.id = ct.contributor_id
 			         WHERE ct.book_id IN (` + bookIDs + `) AND ct.role = 'author'
@@ -75,13 +77,13 @@ var bookFacets = map[string]facet{
 	},
 
 	"narrator": {
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			return `EXISTS (SELECT 1 FROM contributions ct
 			          JOIN editions e ON e.id = ct.edition_id
 			         WHERE e.book_id = ` + BooksAlias + `.id AND ct.role = 'narrator'
 			           AND ct.contributor_id IN (` + inList(len(values)) + `))`, anyOf(values)
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT CAST(c.id AS TEXT), c.name, COUNT(DISTINCT e.book_id)
 			          FROM contributions ct
 			          JOIN contributors c ON c.id = ct.contributor_id
@@ -92,10 +94,10 @@ var bookFacets = map[string]facet{
 	},
 
 	"series": {
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			return BooksAlias + `.series_id IN (` + inList(len(values)) + `)`, anyOf(values)
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT CAST(s.id AS TEXT), s.name, COUNT(*)
 			          FROM books bk JOIN series s ON s.id = bk.series_id
 			         WHERE bk.id IN (` + bookIDs + `)
@@ -104,10 +106,10 @@ var bookFacets = map[string]facet{
 	},
 
 	"year": {
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			return publicationYear + ` IN (` + inList(len(values)) + `)`, anyOf(values)
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT year, year, COUNT(*) FROM (
 			          SELECT ` + publicationYear + ` AS year FROM books ` + BooksAlias + `
 			           WHERE ` + BooksAlias + `.id IN (` + bookIDs + `))
@@ -116,8 +118,55 @@ var bookFacets = map[string]facet{
 		},
 	},
 
+	// The saved shelf is a facet rather than its own endpoint, so it inherits
+	// the scope, the other filters, the sorts and pagination: the shelf is
+	// /api/v1/books?saved=true.
+	"saved": {
+		where: func(userID int64, values []string) (string, []any) {
+			return savedSQL(BooksAlias, userID) + ` IN (` + inList(len(values)) + `)`,
+				anyOf(normaliseBooleans(values))
+		},
+		list: func(userID int64, bookIDs string, args []any) (string, []any) {
+			return `SELECT saved, saved, COUNT(*) FROM (
+			          SELECT ` + savedSQL(BooksAlias, userID) + ` AS saved
+			            FROM books ` + BooksAlias + `
+			           WHERE ` + BooksAlias + `.id IN (` + bookIDs + `))
+			         GROUP BY saved ORDER BY saved`, args
+		},
+	},
+
+	"rating": {
+		where: func(userID int64, values []string) (string, []any) {
+			return ratingSQL(BooksAlias, userID) + ` IN (` + inList(len(values)) + `)`, anyOf(values)
+		},
+		list: func(userID int64, bookIDs string, args []any) (string, []any) {
+			return `SELECT CAST(rating AS TEXT), CAST(rating AS TEXT), COUNT(*) FROM (
+			          SELECT ` + ratingSQL(BooksAlias, userID) + ` AS rating
+			            FROM books ` + BooksAlias + `
+			           WHERE ` + BooksAlias + `.id IN (` + bookIDs + `))
+			         WHERE rating IS NOT NULL
+			         GROUP BY rating ORDER BY rating DESC`, args
+		},
+	},
+
+	// The one facet about the reader rather than the book. Derived from
+	// progress in SQL, so it filters and counts like any other.
+	"reading_state": {
+		where: func(userID int64, values []string) (string, []any) {
+			return ReadingStateSQL(BooksAlias, userID) +
+				` IN (` + inList(len(values)) + `)`, anyOf(values)
+		},
+		list: func(userID int64, bookIDs string, args []any) (string, []any) {
+			return `SELECT state, state, COUNT(*) FROM (
+			          SELECT ` + ReadingStateSQL(BooksAlias, userID) + ` AS state
+			            FROM books ` + BooksAlias + `
+			           WHERE ` + BooksAlias + `.id IN (` + bookIDs + `))
+			         GROUP BY state ORDER BY state`, args
+		},
+	},
+
 	"length": {
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			var (
 				clauses []string
 				args    []any
@@ -140,7 +189,7 @@ var bookFacets = map[string]facet{
 			}
 			return "(" + strings.Join(clauses, " OR ") + ")", args
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT value, label, COUNT(*) FROM (
 			          SELECT ` + lengthCase(false) + ` AS value,
 			                 ` + lengthCase(true) + ` AS label,
@@ -211,12 +260,12 @@ func lengthOrderCase() string {
 
 func editionColumnFacet(column string) facet {
 	return facet{
-		where: func(values []string) (string, []any) {
+		where: func(_ int64, values []string) (string, []any) {
 			return `EXISTS (SELECT 1 FROM editions e
 			         WHERE e.book_id = ` + BooksAlias + `.id
 			           AND e.` + column + ` IN (` + inList(len(values)) + `))`, anyOf(values)
 		},
-		list: func(bookIDs string, args []any) (string, []any) {
+		list: func(_ int64, bookIDs string, args []any) (string, []any) {
 			return `SELECT e.` + column + `, e.` + column + `, COUNT(DISTINCT e.book_id)
 			          FROM editions e
 			         WHERE e.book_id IN (` + bookIDs + `)
@@ -237,13 +286,13 @@ func FacetNames() []string {
 
 // ApplyBookFilters composes every facet present in params onto q. Values of
 // one facet are OR'd, separate facets are AND'd.
-func ApplyBookFilters(q *Query, params url.Values) (*Query, error) {
+func ApplyBookFilters(q *Query, params url.Values, userID int64) (*Query, error) {
 	for _, name := range FacetNames() {
 		values := nonEmpty(params[name])
 		if len(values) == 0 {
 			continue
 		}
-		clause, args := bookFacets[name].where(values)
+		clause, args := bookFacets[name].where(userID, values)
 		q = q.Where(clause, args...)
 	}
 
@@ -257,14 +306,14 @@ func ApplyBookFilters(q *Query, params url.Values) (*Query, error) {
 
 // FacetValues counts one facet over the books q already permits, so a count
 // cannot report a book the caller may not see.
-func (d *DB) FacetValues(ctx context.Context, q *Query, name string) ([]FacetValue, error) {
+func (d *DB) FacetValues(ctx context.Context, q *Query, name string, userID int64) ([]FacetValue, error) {
 	f, ok := bookFacets[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown facet %q", name)
 	}
 
 	bookIDs, idArgs := q.IDsSQL(BooksAlias + ".id")
-	query, args := f.list(bookIDs, idArgs)
+	query, args := f.list(userID, bookIDs, idArgs)
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -283,10 +332,10 @@ func (d *DB) FacetValues(ctx context.Context, q *Query, name string) ([]FacetVal
 	return out, rows.Err()
 }
 
-func (d *DB) AllFacetValues(ctx context.Context, q *Query) (map[string][]FacetValue, error) {
+func (d *DB) AllFacetValues(ctx context.Context, q *Query, userID int64) (map[string][]FacetValue, error) {
 	out := make(map[string][]FacetValue, len(bookFacets))
 	for _, name := range FacetNames() {
-		values, err := d.FacetValues(ctx, q, name)
+		values, err := d.FacetValues(ctx, q, name, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -303,6 +352,21 @@ func anyOf(values []string) []any {
 	out := make([]any, len(values))
 	for i, v := range values {
 		out[i] = v
+	}
+	return out
+}
+
+// normaliseBooleans accepts what a client is likely to send for a flag and
+// settles on the two strings savedSQL produces.
+func normaliseBooleans(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes":
+			out = append(out, "true")
+		default:
+			out = append(out, "false")
+		}
 	}
 	return out
 }

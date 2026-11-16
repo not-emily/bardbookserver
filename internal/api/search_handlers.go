@@ -29,7 +29,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := policy.NewBookScope(CurrentUser(r.Context())).Apply(db.NewSearchQuery(match))
-	q, err := db.ApplyBookFilters(q, r.URL.Query())
+	q, err := db.ApplyBookFilters(q, r.URL.Query(), readerID(r))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

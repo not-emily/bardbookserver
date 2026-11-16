@@ -27,12 +27,22 @@ Give every user a private space — progress, reading state, ratings, saved shel
 
 ## Files to Create
 
-- `internal/db/migrations/0007_spaces.sql`
-- `internal/space/progress.go`, `state.go`, `shelf.go`, `annotations.go`
+- `internal/db/migrations/0008_spaces.sql`, `0009_annotations.sql`
+- `internal/space/progress.go`, `shelf.go`, `annotations.go`, `sync.go`,
+  `collections.go`
+- `internal/model/space.go`, `internal/db/readingstate.go` — the derived-state
+  twins
 - `internal/media/handoff.go` — chapter alignment and interpolation
-- `internal/api/space_handlers.go`, `annotation_handlers.go`, `sync_handlers.go`
-- `internal/policy/annotation.go`
-- `internal/space/progress_test.go`, `internal/media/handoff_test.go`
+- `internal/api/space_handlers.go`, `shelf_handlers.go`,
+  `annotation_handlers.go`, `sync_handlers.go`, `handoff_handlers.go`,
+  `collection_write_handlers.go`
+- `internal/policy/collection.go` — extended with `CollectionPolicy`
+- `internal/media/handoff_test.go`, `internal/db/readingstate_test.go`, and a
+  test file per handler group
+
+No `internal/policy/annotation.go`: every query in `internal/space` takes the
+user id it acts for and there is no variant that takes somebody else's, so
+privacy is structural rather than a check to forget.
 
 ## Dependencies
 
@@ -75,15 +85,15 @@ the sync manifest, and the reading-state and rating facets.
 
 ## Validation
 
-- [ ] Progress set on one device is visible on another
-- [ ] Two offline devices reporting different positions both survive; the API returns both
-- [ ] Reading state derives correctly for unread, partially read, and finished editions
-- [ ] Abandoning and resuming a book behaves sanely
-- [ ] An annotation deleted on one device stays deleted after a stale device syncs
-- [ ] The sync cursor returns only changes since the supplied value
-- [ ] A rating is visible to its owner and absent from every other user's responses
-- [ ] Handoff from 60% of ebook chapter 7 lands inside audiobook chapter 7
-- [ ] Mismatched chapter counts fall back to percentage without erroring
-- [ ] No endpoint returns another user's progress, ratings, or annotations — including for an admin
-- [ ] The sync manifest lists active reads and saved books with file sizes and hashes
-- [ ] The reading-state facet filters and counts through `BookScope` like every other
+- [x] Progress set on one device is visible on another
+- [x] Two offline devices reporting different positions both survive; the API returns both
+- [x] Reading state derives correctly for unread, partially read, and finished editions
+- [x] Abandoning and resuming a book behaves sanely
+- [x] An annotation deleted on one device stays deleted after a stale device syncs
+- [x] The sync cursor returns only changes since the supplied value
+- [x] A rating is visible to its owner and absent from every other user's responses
+- [x] Handoff from 60% of ebook chapter 7 lands inside audiobook chapter 7
+- [x] Mismatched chapter counts fall back to percentage without erroring
+- [x] No endpoint returns another user's progress, ratings, or annotations — including for an admin
+- [x] The sync manifest lists active reads and saved books with file sizes and hashes
+- [x] The reading-state facet filters and counts through `BookScope` like every other

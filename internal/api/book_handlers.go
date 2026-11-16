@@ -22,10 +22,19 @@ func (s *Server) scopedBooks(r *http.Request) *db.Query {
 	return policy.NewBookScope(CurrentUser(r.Context())).Apply(db.NewBookQuery())
 }
 
+// readerID is the profile the request acts as, which is what every per-account
+// column and facet is resolved against.
+func readerID(r *http.Request) int64 {
+	if u := CurrentUser(r.Context()); u != nil {
+		return u.ID
+	}
+	return 0
+}
+
 // filteredBooks adds the facet filters, leaving the order to the caller: a
 // series and a collection each have one of their own.
 func (s *Server) filteredBooks(w http.ResponseWriter, r *http.Request) (*db.Query, bool) {
-	q, err := db.ApplyBookFilters(s.scopedBooks(r), r.URL.Query())
+	q, err := db.ApplyBookFilters(s.scopedBooks(r), r.URL.Query(), readerID(r))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
@@ -39,7 +48,7 @@ func sorted(w http.ResponseWriter, r *http.Request, q *db.Query, fallback func(*
 		return fallback(q), true
 	}
 
-	q, ok := db.ApplyBookSort(q, name)
+	q, ok := db.ApplyBookSort(q, name, readerID(r))
 	if !ok {
 		writeError(w, http.StatusBadRequest,
 			"sort must be one of "+strings.Join(db.BookSortNames(), ", "))
@@ -49,7 +58,7 @@ func sorted(w http.ResponseWriter, r *http.Request, q *db.Query, fallback func(*
 }
 
 func defaultSort(q *db.Query) *db.Query {
-	q, _ = db.ApplyBookSort(q, db.DefaultBookSort)
+	q, _ = db.ApplyBookSort(q, db.DefaultBookSort, 0)
 	return q
 }
 
@@ -79,7 +88,7 @@ func (s *Server) bookPayload(w http.ResponseWriter, r *http.Request, q *db.Query
 		return nil, false
 	}
 
-	rows, err := s.db.Books(r.Context(), q.Limit(limit).Offset(offset))
+	rows, err := s.db.Books(r.Context(), q.Limit(limit).Offset(offset), readerID(r))
 	if err != nil {
 		s.logger.Error("list books", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not read the library")
@@ -111,7 +120,7 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail, err := s.db.BookDetail(r.Context(), db.WhereBookID(s.scopedBooks(r), id))
+	detail, err := s.db.BookDetail(r.Context(), db.WhereBookID(s.scopedBooks(r), id), readerID(r))
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "no such book")

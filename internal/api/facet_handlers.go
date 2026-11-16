@@ -23,7 +23,7 @@ func (s *Server) handleListFacets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	values, err := s.db.AllFacetValues(r.Context(), q)
+	values, err := s.db.AllFacetValues(r.Context(), q, readerID(r))
 	if err != nil {
 		s.logger.Error("list facets", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not read the facets")
@@ -50,7 +50,7 @@ func (s *Server) handleGetFacet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	values, err := s.db.FacetValues(r.Context(), q, name)
+	values, err := s.db.FacetValues(r.Context(), q, name, readerID(r))
 	if err != nil {
 		s.logger.Error("list facet", "facet", name, "error", err)
 		writeError(w, http.StatusInternalServerError, "could not read the facet")

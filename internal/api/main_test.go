@@ -93,7 +93,12 @@ func (h *harness) get(path string) *httptest.ResponseRecorder {
 
 func (h *harness) authedRequest(path string) *http.Request {
 	h.t.Helper()
-	r := httptest.NewRequest(http.MethodGet, path, nil)
+	return h.authedRequestMethod(http.MethodGet, path)
+}
+
+func (h *harness) authedRequestMethod(method, path string) *http.Request {
+	h.t.Helper()
+	r := httptest.NewRequest(method, path, nil)
 	r.Header.Set("Authorization", "Bearer "+h.token)
 	return r
 }
@@ -116,8 +121,13 @@ func (h *harness) getJSON(path string, dst any) {
 	if res.Code != http.StatusOK {
 		h.t.Fatalf("GET %s = %d, want 200: %s", path, res.Code, res.Body.String())
 	}
+	h.decode(res, dst)
+}
+
+func (h *harness) decode(res *httptest.ResponseRecorder, dst any) {
+	h.t.Helper()
 	if err := json.Unmarshal(res.Body.Bytes(), dst); err != nil {
-		h.t.Fatalf("decode %s: %v (body %s)", path, err, res.Body.String())
+		h.t.Fatalf("decode response: %v (body %s)", err, res.Body.String())
 	}
 }
 
@@ -134,9 +144,89 @@ func (h *harness) exec(query string, args ...any) int64 {
 	return id
 }
 
+// put sends JSON as the given device's token, so a test can act as a second
+// device without a second harness.
+func (h *harness) put(path, token string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
+	return h.sendJSON(http.MethodPut, path, token, body)
+}
+
+func (h *harness) sendJSON(method, path, token string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
+
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+
+	r := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("Content-Type", "application/json")
+	return h.serve(r)
+}
+
+// jsonHasKey checks for a top-level key, which is how the tests assert that a
+// denial carries a reason code and an absence does not.
+func jsonHasKey(body []byte, key string) bool {
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return false
+	}
+	_, ok := decoded[key]
+	return ok
+}
+
+func (h *harness) getAs(path, token string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	return h.serve(r)
+}
+
+// addDevice issues a second token for the same account, which is what a
+// divergence test needs.
+func (h *harness) addDevice(name string) string {
+	h.t.Helper()
+	_, token, err := auth.NewStore(h.db.DB).CreateDevice(context.Background(), h.userID, name)
+	if err != nil {
+		h.t.Fatalf("create device %q: %v", name, err)
+	}
+	return token
+}
+
+// addUser creates a separate account with its own device, for asserting that
+// one space never reaches another.
+func (h *harness) addUser(username string, admin bool) (int64, string) {
+	h.t.Helper()
+
+	store := auth.NewStore(h.db.DB)
+	user, err := store.CreateUser(context.Background(), auth.NewUser{
+		Username: username,
+		Password: "another password entirely",
+		IsAdmin:  admin,
+	})
+	if err != nil {
+		h.t.Fatalf("create user %q: %v", username, err)
+	}
+	_, token, err := store.CreateDevice(context.Background(), user.ID, username+"'s device")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return user.ID, token
+}
+
 func (h *harness) oneValue(query string, args ...any) int64 {
 	h.t.Helper()
 	var v int64
+	if err := h.db.QueryRow(query, args...).Scan(&v); err != nil {
+		h.t.Fatalf("query %q: %v", query, err)
+	}
+	return v
+}
+
+func (h *harness) oneString(query string, args ...any) string {
+	h.t.Helper()
+	var v string
 	if err := h.db.QueryRow(query, args...).Scan(&v); err != nil {
 		h.t.Fatalf("query %q: %v", query, err)
 	}

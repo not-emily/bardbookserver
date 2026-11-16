@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -51,10 +52,29 @@ type FileRef struct {
 	ModifiedAt      time.Time
 }
 
+// VisibleEdition resolves an edition through the caller's book scope, so a
+// guessed id cannot reach a book the caller may not see.
+func (d *DB) VisibleEdition(ctx context.Context, scoped *Query, editionID int64) (int64, error) {
+	bookIDs, args := scoped.IDsSQL(BooksAlias + ".id")
+
+	var bookID int64
+	err := d.QueryRowContext(ctx, `
+		SELECT e.book_id FROM editions e
+		 WHERE e.id = ? AND e.book_id IN (`+bookIDs+`)`,
+		append([]any{editionID}, args...)...).Scan(&bookID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("resolve edition %d: %w", editionID, err)
+	}
+	return bookID, nil
+}
+
 // BookDetail takes a query already narrowed to one id so the scope, not the
 // handler, decides whether the book exists for this account.
-func (d *DB) BookDetail(ctx context.Context, q *Query) (*BookDetail, error) {
-	book, err := d.Book(ctx, q)
+func (d *DB) BookDetail(ctx context.Context, q *Query, userID int64) (*BookDetail, error) {
+	book, err := d.Book(ctx, q, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +90,54 @@ func (d *DB) BookDetail(ctx context.Context, q *Query) (*BookDetail, error) {
 		return nil, err
 	}
 	return detail, nil
+}
+
+// Chapters reads one edition's chapters. The caller resolves the edition
+// through a scope first; this takes the id it got back.
+func (d *DB) Chapters(ctx context.Context, editionID int64) ([]model.Chapter, error) {
+	rows, err := d.QueryContext(ctx, `
+		SELECT id, edition_id, ordinal, COALESCE(title, ''), start_seconds,
+		       COALESCE(href, '')
+		  FROM chapters WHERE edition_id = ? ORDER BY ordinal`, editionID)
+	if err != nil {
+		return nil, fmt.Errorf("read chapters of edition %d: %w", editionID, err)
+	}
+	defer rows.Close()
+
+	var out []model.Chapter
+	for rows.Next() {
+		var (
+			ch    model.Chapter
+			start sql.NullFloat64
+		)
+		if err := rows.Scan(&ch.ID, &ch.EditionID, &ch.Ordinal, &ch.Title,
+			&start, &ch.Href); err != nil {
+			return nil, fmt.Errorf("scan chapter: %w", err)
+		}
+		if start.Valid {
+			ch.StartSeconds = &start.Float64
+		}
+		out = append(out, ch)
+	}
+	return out, rows.Err()
+}
+
+// EditionDuration falls back to the sum of its files, since a multi-file
+// audiobook records a duration per part rather than one for the edition.
+func (d *DB) EditionDuration(ctx context.Context, editionID int64) (*float64, error) {
+	var duration sql.NullFloat64
+	err := d.QueryRowContext(ctx, `
+		SELECT COALESCE(
+			(SELECT e.duration_seconds FROM editions e WHERE e.id = ?),
+			(SELECT SUM(f.duration_seconds) FROM files f WHERE f.edition_id = ?))`,
+		editionID, editionID).Scan(&duration)
+	if err != nil {
+		return nil, fmt.Errorf("read duration of edition %d: %w", editionID, err)
+	}
+	if !duration.Valid {
+		return nil, nil
+	}
+	return &duration.Float64, nil
 }
 
 func (d *DB) bookGenres(ctx context.Context, bookID int64) ([]GenreRef, error) {

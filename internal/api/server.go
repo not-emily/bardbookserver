@@ -13,6 +13,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/media"
+	"github.com/not-emily/bardbookserver/internal/space"
 )
 
 const shutdownGrace = 15 * time.Second
@@ -21,6 +22,7 @@ type Server struct {
 	cfg     *config.Config
 	db      *db.DB
 	store   *auth.Store
+	space   *space.Store
 	covers  *media.Cache
 	logger  *slog.Logger
 	version string
@@ -34,6 +36,7 @@ func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version
 		cfg:          cfg,
 		db:           database,
 		store:        auth.NewStore(database.DB),
+		space:        space.NewStore(database),
 		covers:       media.NewCache(cfg.CoverCacheDir()),
 		logger:       logger,
 		version:      version,
@@ -64,6 +67,26 @@ func (s *Server) handler() http.Handler {
 	authed.HandleFunc("GET /api/v1/series/{id}", s.handleGetSeries)
 	authed.HandleFunc("GET /api/v1/collections", s.handleListCollections)
 	authed.HandleFunc("GET /api/v1/collections/{id}", s.handleGetCollection)
+	authed.HandleFunc("GET /api/v1/editions/{id}/progress", s.handleGetProgress)
+	authed.HandleFunc("PUT /api/v1/editions/{id}/progress", s.handleSetProgress)
+	authed.HandleFunc("PUT /api/v1/books/{id}/saved", s.handleSaveBook)
+	authed.HandleFunc("DELETE /api/v1/books/{id}/saved", s.handleUnsaveBook)
+	authed.HandleFunc("PUT /api/v1/books/{id}/rating", s.handleSetRating)
+	authed.HandleFunc("DELETE /api/v1/books/{id}/rating", s.handleClearRating)
+	authed.HandleFunc("PUT /api/v1/books/{id}/state", s.handleSetState)
+	authed.HandleFunc("GET /api/v1/history", s.handleHistory)
+	authed.HandleFunc("GET /api/v1/sync", s.handleSync)
+	authed.HandleFunc("POST /api/v1/editions/{id}/handoff", s.handleHandoff)
+	authed.HandleFunc("GET /api/v1/books/{id}/handoff", s.handleBookHandoffTargets)
+	authed.HandleFunc("GET /api/v1/annotations", s.handleListAnnotations)
+	authed.HandleFunc("GET /api/v1/annotations/changes", s.handleAnnotationChanges)
+	authed.HandleFunc("PUT /api/v1/annotations/{uuid}", s.handleSaveAnnotation)
+	authed.HandleFunc("DELETE /api/v1/annotations/{uuid}", s.handleDeleteAnnotation)
+	authed.HandleFunc("POST /api/v1/collections", s.handleCreateCollection)
+	authed.HandleFunc("PATCH /api/v1/collections/{id}", s.handleUpdateCollection)
+	authed.HandleFunc("DELETE /api/v1/collections/{id}", s.handleDeleteCollection)
+	authed.HandleFunc("PUT /api/v1/collections/{id}/books/{bookID}", s.handleAddToCollection)
+	authed.HandleFunc("DELETE /api/v1/collections/{id}/books/{bookID}", s.handleRemoveFromCollection)
 	authed.HandleFunc("GET /api/v1/groupings/uncertain", s.handleListUncertainGroupings)
 	authed.HandleFunc("POST /api/v1/editions/{id}/group", s.handleMergeEdition)
 	authed.HandleFunc("DELETE /api/v1/editions/{id}/group", s.handleSplitEdition)
