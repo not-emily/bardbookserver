@@ -1,0 +1,892 @@
+# Decisions Log - bardbookserver
+
+Decisions made during implementation, including those that changed or went
+beyond what was planned.
+
+## 2026-11-16: A provider fills only what the file cannot measure
+
+**Decision:** The plan's precedence chain — sidecar → provider → embedded →
+path — is not applied uniformly. A provider outranks the file on bibliographic
+fields (title, author, description, publisher, subjects, ISBN) and is never
+consulted for what the file itself measures: duration, chapter marks, page
+count and cover art. `provider.Query` carries `WantCover`, `WantPageCount` and
+`WantChapters`, set from what the local metadata already has, and a provider
+offers those fields only when asked.
+
+**Rationale:** Taken literally, the chain lets an estimate overwrite a
+measurement. Open Library's `number_of_pages_median` is the median across every
+edition of a work, so enabling a provider would have replaced a PDF's exact
+page count with a guess. The same for chapters, where the plan already says the
+opposite — "prefer Audnexus over local `chpl` data only when local chapters are
+absent" — which a uniform chain cannot express.
+
+Making it a request rather than a post-merge filter also saves the work: a
+library of EPUBs with embedded art never downloads 5000 covers it already has,
+and the flag is off for exactly the books where it would be waste.
+
+**Alternatives Considered:** Reordering the whole chain to put embedded above
+provider, which gives the file's sloppy or absent title priority over a good
+one and loses the point of enrichment. Filtering the provider's result after
+the merge, which spends the request and the download first.
+
+**Impact:** `metadata.Resolve` is unchanged and still has one rule. The scanner
+resolves local metadata first and passes it to `provider.QueryFor`, so the
+chain reads as locks → provider → everything local.
+`TestOpenLibraryLeavesWhatTheFileAlreadyMeasured` pins it.
+
+---
+
+## 2026-11-16: The lookup is keyed on everything known locally, not the tags
+
+**Decision:** The scanner resolves the sidecar, the file's tags and the path
+convention into one local metadata record, asks the provider with that, and
+then resolves again with the provider's answer inserted below the locks.
+
+**Rationale:** Found by test: keying the query on the embedded tags alone meant
+an untagged file was never looked up, because the query had no title. That is
+the common case rather than an edge — an M4B with no tags, a PDF with no title,
+or any file whose title Bard knows only from `Author/Series/## - Title/`. The
+path convention exists precisely to name those files, so excluding it from the
+query excluded the books that need a provider most.
+
+Resolving twice costs nothing: `Resolve` only fills unknown fields, so merging
+an already-merged record is equivalent to the long chain, and the second call
+reads as the two things that actually rank — the locks, then the provider,
+then everything local.
+
+**Alternatives Considered:** Keying on the tags and falling back to the path
+only when they are empty, which is the same thing with a branch. Looking up
+after resolution and re-resolving, which is where this started.
+
+**Impact:** `provider.QueryFor` takes local metadata rather than parser output.
+`TestAProviderFillsWhatTheFileCouldNotSay` runs against a fixture whose EPUB
+does not parse at all, which is the condition that caught this.
+
+---
+
+## 2026-11-16: Fetch takes the candidate, and the cache sits in the HTTP layer
+
+**Decision:** The plan's `Fetch(ctx, id string)` became
+`Fetch(ctx, Query, Candidate)`, with the candidate carrying an unexported
+payload holding what the search already returned. Caching is keyed on the
+request URL and status rather than on a provider identifier, and lives in the
+client every provider goes out through.
+
+**Rationale:** Open Library's search response carries the title, authors, year,
+publisher, page count and cover id; only the description needs the work record.
+A bare id would make `Fetch` re-request what the search just returned. Fix
+Match passes the candidate a person picked, which it already holds, so nothing
+is lost. The payload is unexported and the providers share the package, so it
+never leaves.
+
+Caching the HTTP exchange rather than the parsed result means both search and
+fetch are cached without either provider remembering to, a 404 is cached as the
+answer it is, and a later parser improvement re-reads the stored body instead
+of re-asking.
+
+**Alternatives Considered:** Caching normalized `Metadata`, which needs a
+schema version and loses the raw body a parser fix would want. Re-requesting
+inside `Fetch` and relying on the cache to make it free, which works and is
+one more request on the first pass of every book.
+
+**Impact:** `provider_cache` is `(provider, url) → (status, body)` with no
+expiry. Artwork bypasses it, since the cover cache already
+content-addresses what was kept.
+
+---
+
+## 2026-11-16: A contradicted author refuses the match; a surname confirms it
+
+**Decision:** Scoring is identifier-first and then title-carried: an ISBN or
+ASIN match scores 1, an exact normalized title 0.6, a subtitle-stripped match
+0.5, a prefix 0.35. An agreeing author adds 0.4, an absent one adds nothing,
+and a contradicting one halves the score, which puts even an exact title below
+the 0.6 threshold. Agreement accepts one name being contained in the other.
+
+**Rationale:** Normalization is `grouping`'s, so the rule that decides two
+editions are one book is the rule that decides a provider found the right one.
+A title alone has to be enough, because many files name no author at all; a
+contradicted author has to be fatal, because a confidently wrong match takes a
+person to notice and undo, while a missed one only leaves the book as the file
+described it.
+
+Containment rather than equality is not a loosening for its own sake: Bard's
+own recommended layout yields an author folder that is frequently a surname,
+and `Tolkien` must agree with `J. R. R. Tolkien` or a library laid out the way
+the docs ask would match nothing.
+
+**Alternatives Considered:** Fuzzy string distance, which turns a wrong answer
+into a confident wrong answer — the same reason the Phase 7 handoff refuses it.
+Requiring an identifier, which excludes every Gutenberg EPUB, none of which
+carries an ISBN.
+
+**Impact:** `Rank` keeps candidates below the threshold with their scores,
+because Fix Match exists to show a person what the automatic match refused.
+`Best` is the only caller that applies the threshold.
+
+---
+
+## 2026-11-16: Progress is keyed on (user, edition, device)
+
+**Decision:** A progress row is per device. `(user, edition)` names the set of
+positions to aggregate, not a row. `devices.id` is nulled rather than cascaded
+when a device is revoked.
+
+**Rationale:** The plan's progress contract says "keyed on (user, edition),
+never (user, book)" and its `Position` struct carries no device, but the same
+phase requires that "two offline devices reporting different positions both
+survive" and that the API "return every known position". One row cannot
+diverge from itself, so the per-device key is what the stated behaviour needs;
+the plan's intent — never collapse the ebook and the audio position — is
+untouched, since the edition is still part of the key.
+
+Nulling the device on a revoke keeps the reading. Cascading would mean
+revoking a lost phone silently rolls its owner's progress back to whatever
+another device last reported, which is the data loss this phase exists to
+prevent. The unique index is partial (`WHERE device_id IS NOT NULL`) because
+SQLite treats NULLs as distinct, so a plain one would let a revoked device
+accumulate rows.
+
+**Alternatives Considered:** One row per (user, edition) plus a separate
+per-device table, which is the same storage with a canonical row that resolves
+divergence silently — the thing the plan forbids. Keeping a single row and
+taking the furthest position, which loses the ability to say "your iPad is
+further ahead".
+
+**Impact:** `client_seq` is compared only within one device, since the counters
+are each client's own and not comparable across them —
+`TestTwoDevicesDivergingBothSurvive` asserts a lower sequence from a second
+device is not read as stale. `space.Diverged` reports whether the spread
+exceeds 1%, so a client is not interrupted over half a point.
+
+---
+
+## 2026-11-16: Reading state is derived, and its SQL interpolates the user id
+
+**Decision:** Only `finished` and `abandoned` are stored, as `user_books.marked`;
+unread and reading derive from the furthest progress across a book's editions.
+`model.DeriveReadingState` and `db.ReadingStateSQL` are twins held together by
+`TestReadingStateMatchesSQL`. The SQL writes the user id into the expression
+rather than binding it.
+
+**Rationale:** Deriving is what keeps "continue reading" correct with nobody
+maintaining it, and it has to exist in SQL because the facet filters and counts
+on it — a Go-side annotation would break pagination the same way a post-filter
+does. A hand-set mark outranks progress because abandoning a book you are 60%
+through must survive the progress that would otherwise call it "reading".
+
+The interpolation is deliberate and narrow: the expression needs the id three
+times, and `db.Query` concatenates arguments positionally, so numbered
+parameters in one clause would misalign every other clause in the query. The
+value is an `int64` taken from the authenticated session, never a string from a
+request.
+
+**Alternatives Considered:** Storing the state and updating it on every
+progress write, which is a second source of truth to drift. Binding the id
+three times, which works only while nothing else in the query takes arguments —
+a trap for the next person to add a facet.
+
+**Impact:** `FinishedPercent` is 0.95, because an audiobook ends in credits and
+an ebook in back matter. `finished_at` is stamped the first time a book crosses
+it and is cleared only when the mark is removed *and* progress no longer
+supports it, so un-finishing a book you did read keeps its history entry.
+
+---
+
+## 2026-11-16: The shelf and reading state are facets, not endpoints
+
+**Decision:** The saved shelf is `GET /api/v1/books?saved=true`, and reading
+state and personal rating are facets alongside it. `ApplyBookSort`,
+`ApplyBookFilters` and `FacetValues` all take the reader's id.
+
+**Rationale:** A `/shelf` endpoint would need its own scope, filters, sorts and
+pagination, and would be a second read path to keep leak-free. As facets they
+inherit all of it, and `?saved=true&format=m4b&sort=saved` composes for free.
+This is the payoff of Decision 8's single query builder reaching user state.
+
+**Alternatives Considered:** Dedicated endpoints per list, which is what most
+of these APIs do and what makes their filtering inconsistent.
+
+**Impact:** The facet registry's two halves now take a user id; the facets that
+do not care take `_`. `bookSorts` became a function of the user because
+ordering a shelf by when it was shelved needs one. History stays its own
+endpoint, since it is ordered by a date that is not a book column and returns a
+different shape.
+
+---
+
+## 2026-11-16: Annotations are keyed on a client-supplied uuid
+
+**Decision:** The client generates each annotation's uuid; the server upserts
+on `(user_id, uuid)` and assigns a per-user sequence number on every write,
+including the soft delete.
+
+**Rationale:** An annotation is made offline, so it needs an identity before it
+ever reaches the server, and a retried upload after a dropped connection has to
+update rather than make a second highlight. Two accounts may hold the same uuid
+without colliding, since neither generated it for the other.
+
+The sequence is per user so the lookup rides `annotations_cursor_idx`, and
+writers serialize on an immediate transaction, so no two can claim one number.
+A delete advances it like any other change, which is what carries the tombstone
+to a device that synced before the delete — a hard delete would leave nothing
+to carry and the stale device would upload the highlight again.
+
+**Alternatives Considered:** Server-assigned ids with a client-side mapping
+table, which puts the reconciliation in every client. A global sequence, which
+needs a full-table MAX on every write.
+
+**Impact:** The cursor advances only as far as what was actually handed over,
+so a truncated page resumes rather than skipping —
+`TestATruncatedChangesPageIsResumable`. Re-saving a deleted uuid revives it,
+deliberately: the client is the authority on whether its own annotation exists.
+
+---
+
+## 2026-11-16: The handoff keeps a chapter number when nothing else survives
+
+**Decision:** Chapter titles are normalised by stripping leading decoration
+("Chapter", "Part", a leading number and punctuation), but only when something
+remains. A title that is only its number keeps the number. A title matching
+more than one target chapter falls back to percentage.
+
+**Rationale:** Found while testing: `normaliseTitle("1984")` returned empty,
+because the stripper could not tell a number that decorates a title from a
+number that *is* one — the same ambiguity the path parser hit in Phase 4.
+Falling back to the whole title when stripping leaves nothing fixes that, and
+has the side benefit that two lists which both number their chapters can still
+align on the number.
+
+Ambiguity falling back is the important half. Landing confidently in the wrong
+chapter is worse than admitting the lists do not line up, which is why a title
+found twice is treated as no match at all.
+
+**Alternatives Considered:** Fuzzy string distance, which turns a wrong answer
+into a confident wrong answer. Aligning purely by index whenever counts differ,
+which misfiles every chapter after an audiobook's prologue track.
+
+**Impact:** Verified against the real library: Red Rising's M4B and its 47-part
+MP3 set carry chapter starts agreeing to within a second, and a handoff from
+chapter 20 at 50% lands at 19722.6s in the other edition, inside the same
+chapter. `media.MapPosition` is pure, so the alignment is tested without a
+database.
+
+---
+
+## 2026-11-16: The sync manifest names candidates, with a reason each
+
+**Decision:** The manifest lists editions with a reason — `reading`, `saved`,
+or `next_in_series` — strongest first, each edition appearing once. A book
+being read contributes only the edition actually in progress; a shelved book
+contributes all of them.
+
+**Rationale:** Per Decision 15 the client decides what to cache, so the server's
+job is to name candidates with their sizes and hashes and stop there. The reason
+is what lets a client prioritise without guessing.
+
+Listing only the edition in progress matters because reading the ebook says
+nothing about wanting 600MB of narration. A shelved book is the opposite: no
+format has been chosen yet, so the sizes in the manifest are what the choice
+gets made with.
+
+**Alternatives Considered:** Every edition of everything, which puts a
+gigabyte of candidates in front of a phone. A server-side priority score,
+which is the server guessing at storage it cannot see.
+
+**Impact:** "Next in series" applies the scope to the candidate as well as the
+result, or a hidden book would be chosen as next and then filtered out,
+silently stopping the series there. No expiry, no caps, no eviction, as
+Decision 15 requires.
+
+---
+
+## 2026-11-16: The sync manifest moves to Phase 7
+
+**Decision:** Phase 6 ships every other deliverable and leaves
+`GET /api/v1/sync` to Phase 7.2. The reading-state and personal-rating facets
+are left out of the facet set for the same reason.
+
+**Rationale:** The manifest is defined entirely by state Phase 7 creates —
+active reads, next unread in a series the user is reading, and the saved shelf.
+None of those tables exist yet, so the endpoint could only have returned an
+empty list. Phase 7's own file already says it "feeds the reading-state facet
+from Phase 6", so the dependency runs the other way round in two places.
+
+**Alternatives Considered:** Shipping the endpoint with its final response shape
+and no content, which locks the contract early but passes its validation line on
+shape rather than substance. Pulling a progress table and a saved shelf forward
+into Phase 6, which spends Phase 7's design decisions — divergence surfacing,
+derived state — without their tests.
+
+**Impact:** Phase 6's validation list loses two lines, noted in the phase file.
+Adding a facet is one entry in `db.bookFacets`, so Phase 7 adds reading state
+without touching a handler.
+
+---
+
+## 2026-11-16: The search index was never populated, and now updates inside the scan
+
+**Decision:** `db.ReindexBook` and `db.RemoveBookFromIndex` became package
+functions taking a `db.Conn`, and the scanner calls them inside the same
+transaction as the metadata that changed. `grouping.ReapEditionlessBooks`
+returns the ids it deleted, and `Merge` and `Split` return an `Outcome` naming
+the books to reindex.
+
+**Rationale:** Phase 3 built `books_fts` and its maintenance function; nothing
+outside tests ever called it, so `/api/v1/search` found nothing on a real
+library while the Phase 3 tests passed by reindexing by hand. Found by running
+the server against the sample set.
+
+Updating the index in the transaction that caused the change means a scan
+killed halfway cannot leave a book indexed under its old title. Removal matters
+independently: SQLite reuses rowids, so a stale row would hand its text to
+whichever book is created next.
+
+**Alternatives Considered:** A post-scan pass reindexing every book, which
+writes 5000 rows on a clean rescan and breaks the "a clean rescan writes
+nothing" property. An SQLite trigger, which cannot see authors and narrators
+because they arrive through joins.
+
+**Impact:** Only touched books are rewritten, so a clean rescan still writes
+nothing. `TestScanPopulatesTheSearchIndex` and
+`TestReapedBookLeavesTheSearchIndex` are the regression tests. A reindex
+failure after a manual merge is logged and leaves a stale row rather than
+undoing the merge, because the merge has already committed.
+
+---
+
+## 2026-11-16: The file ETag is id, size and mtime, not the content hash
+
+**Decision:** `media.FileETag` uses `files.content_hash` when it is set and
+falls back to a strong tag built from the file id, its size and its mtime.
+
+**Rationale:** The Phase 6 notes ask for a strong ETag from the content hash,
+but `files.content_hash` has never been written: hashing every file means
+reading every byte, which is exactly what the scanner avoids to keep a cold
+scan of 5000 titles affordable. Size plus mtime is sound here because the
+scanner restats every file on every pass, so changed bytes change the tag.
+Preferring the hash when present means Phase 10's uploads, or any later hashing
+pass, improve the tag for free.
+
+**Alternatives Considered:** Hashing lazily on first full download, which reads
+a gigabyte to answer a range request. Hashing during the scan, which is the
+cost Phase 4 declined.
+
+**Impact:** `files.modified_at` is stored as RFC3339Nano by the scanner while
+the defaulted columns use `datetime('now')`; `db.parseStamp` accepts both.
+Parsing it with the wrong layout silently yielded the zero time and cost the
+tag its mtime component, so a file edited in place at the same size kept its
+ETag. Pinned by `TestFileETagCarriesTheModifiedTime`.
+
+---
+
+## 2026-11-16: Facets filter with EXISTS, and counts inherit the scope
+
+**Decision:** Every facet contributes an `EXISTS` subquery rather than a join,
+values within one facet are OR'd and separate facets AND'd, and facet counts
+run over the same scoped and filtered book set as the listing they accompany.
+An unrecognised query parameter is a 400 rather than an ignored filter.
+
+**Rationale:** A book with two editions matching one filter would appear twice
+through a join, which inflates `total`, breaks pagination and double-counts the
+facet — the same class of bug as post-filtering, and the reason Decision 4 puts
+visibility in the query. Counting over the whole library instead of the scoped
+set would let a number report a book the caller cannot see, which is a leak even
+though the record is absent.
+
+Rejecting an unknown parameter matters because a filter that silently does not
+apply returns more than the caller asked for; `?formats=epub` should fail rather
+than quietly list everything.
+
+**Alternatives Considered:** Joining and de-duplicating with `DISTINCT`, which
+breaks `LIMIT` arithmetic. Counting each facet with its own filter removed, the
+usual multi-select behaviour, which contradicts the validation line asking
+counts to match what the same filters return.
+
+**Impact:** `db.bookFacets` is the one place a dimension is defined, with a
+`where` and a `list` per facet. `TestFacetCountsMatchTheRecordsTheSameFiltersReturn`
+walks every facet value and asserts the count equals the listing total.
+
+---
+
+## 2026-11-16: One length facet spans both kinds at 150 seconds a page
+
+**Decision:** `db.LengthSeconds` is an audiobook's duration, or a page count
+times 150 seconds when there is no audio edition. One `length` facet and one
+`length` sort read it.
+
+**Rationale:** The plan asks for a "length bucket" without saying how a 400-page
+ebook and a 16-hour audiobook share one. Converting gives a single facet whose
+buckets mean the same thing either way, and the sample library's ebook and
+audiobook pairs work out to 115–170 seconds a page, so 150 is the middle rather
+than a guess. Page counts only ever come from PDFs — the EPUB parser produces
+none — so this is a fallback rather than the usual answer.
+
+**Alternatives Considered:** Separate `duration` and `pages` facets, which is
+unambiguous but makes "under five hours" two different questions. Bucketing only
+audiobooks, which leaves every ebook out of a facet the plan asks to span the
+library.
+
+**Impact:** A book with neither a duration nor a page count falls outside every
+bucket and is excluded from a length-filtered listing, which is correct: an
+unknown length cannot satisfy "under five hours". The three EPUBs in the sample
+set are in that position today.
+
+---
+
+## 2026-11-16: BookScope ships without a BookPolicy
+
+**Decision:** `internal/policy/book.go` holds `BookScope` only. The
+`View`/`Read`/`Save` split arrives in Phase 9 with the age ladder it exists to
+express.
+
+**Rationale:** Phase 6 has no per-book decision to make — anything the scope
+returns is readable by anyone who can see it. Three methods that all `allow()`
+would be scaffolding whose fields Phase 9 then has to change, and the
+leak-proofing the plan wants lives in the scope regardless: book detail, file
+content and cover all resolve through a scoped query, so Phase 9's
+direct-by-id leak tests are covered by changing one function.
+
+**Alternatives Considered:** Writing the three always-allow methods now so the
+handlers already call through them. Rejected because the handlers would be
+calling a question with one possible answer, and the scope already gives Phase 9
+a single place to add the ladder.
+
+**Impact:** Phase 9 adds `BookPolicy` rather than extending it, and adds its age
+conditions inside `BookScope.Apply`. The scope's teeth today are
+`sources.enabled`, which also drops editionless books.
+
+---
+
+## 2026-11-16: Cover variants stay pre-generated at scan time
+
+**Decision:** Covers keep the Phase 4.3 behaviour of writing every configured
+variant when the cover is first stored. The read path picks the smallest cached
+width that covers the request and falls back to the full-size copy.
+
+**Rationale:** The Phase 6 notes ask for variants generated on first request
+rather than pre-generated for 5000 books, but 4.3 already pre-generates them and
+the cost is two small JPEGs per distinct cover, deduplicated by content hash.
+Reversing it would add a write path to the request handler for no measurable
+saving.
+
+The fallback is what makes this safe: a cover smaller than a configured width
+has no file at that width, and adding a width later leaves existing covers
+without one. `BestVariant` consults what is actually on disk rather than
+assuming `Widths`.
+
+**Alternatives Considered:** Generating on demand and caching, which puts image
+decoding in the request path and needs its own concurrency story.
+
+**Impact:** `Cache.Variants` is the authority on what exists. A 400px cover in
+the sample set has only the 180 variant, so `?width=480` correctly serves the
+400px original.
+
+---
+
+## 2026-11-13: A differing ISBN does not prevent a group
+
+**Decision:** A matching ISBN or ASIN forces a group. A differing one does
+nothing. This contradicts a Phase 5 validation line that asked for the
+opposite.
+
+**Rationale:** An ISBN identifies a manifestation, not a work. An ebook and its
+audiobook have different ISBNs, two narrations have different ISBNs, and two
+printings of one novel have different ISBNs — all of which are the same book
+with several editions under Decision 2. Implementing the veto would have broken
+the two validation lines directly above it in the same list, which ask for
+exactly those groupings.
+
+Precision comes from title plus author instead. An edition with no known author
+offers no title key at all, so two different books called "Collected Poems"
+cannot merge.
+
+**Alternatives Considered:** Vetoing only within one kind, which still breaks
+two narrations grouping. Vetoing only weak matches, which keeps the letter of
+the requirement while making the behaviour harder to predict than simply not
+having it.
+
+**Impact:** Two distinct books sharing a title are kept apart by their authors,
+covered by a test. If a real library ever produces a bad merge that an ISBN
+would have caught, the manual split is permanent and one click.
+
+---
+
+## 2026-11-13: Transactions begin immediate
+
+**Decision:** The SQLite DSN sets `_txlock=immediate`, so every transaction
+takes the write lock up front.
+
+**Rationale:** Phase 5 made the scanner read before it writes — it looks for a
+book to join, then inserts. A deferred transaction that reads first cannot
+upgrade to a writer once another connection has written, and WAL reports that
+as `SQLITE_BUSY` immediately rather than waiting out `busy_timeout`, because
+waiting cannot help. The scan job failed with "database is locked" roughly one
+run in ten under `-race`, and would have failed in production as soon as Phase
+7 added progress writes alongside a scan.
+
+**Alternatives Considered:** Retrying on busy, which is more code and leaves
+the window open elsewhere. Moving the reads outside the transaction, which
+loses the consistency that stops two sources creating the same book at once.
+
+**Impact:** Writers serialize, which at this scale is what we want anyway.
+Caught only because the failure was intermittent under the race detector and
+worth chasing rather than re-running.
+
+---
+
+## 2026-11-13: The sidecar records decisions, and only locked fields outrank the file
+
+**Decision:** `bard.json` holds the full resolved metadata for every edition in
+its directory, plus a `locked` list naming the fields a person corrected by
+hand. On a scan it is consulted twice: the locked subset at the highest
+precedence, and the whole record at the lowest. The resolution order is
+locked sidecar → embedded → path convention → remembered sidecar.
+
+**Rationale:** A sidecar that simply outranked the embedded parsers would
+freeze the library. Once written, a fix to the EPUB or MP4 parser could never
+reach a book that had been scanned even once, because the stale value would keep
+winning. Consulting it twice gives all three properties at the same time: a
+hand correction survives anything, a parser improvement reaches every unlocked
+field, and a value nothing can re-derive — a provider's ASIN, in Phase 8 — is
+still never forgotten.
+
+Writing the derivable fields too, rather than corrections alone, is what makes
+the file worth opening: it is the thing a person reads and edits, and it is what
+rebuilds an index on a machine with no network.
+
+Chapters and cover art are deliberately excluded. Both are re-derived on every
+scan from the file itself, and neither belongs in something meant to be
+hand-edited.
+
+**Alternatives Considered:** Storing only locked fields, which keeps precedence
+trivially correct but leaves the file nearly empty and useless for a rebuild.
+Storing everything at the highest precedence, which is the freezing problem
+above.
+
+**Impact:** `metadata.Resolve` is called with four sources and the order lives
+at that one call site. Unlocking a field in the admin UI must also drop it from
+`locked` in the sidecar, or the old value keeps winning. Renaming any entry in
+`model.fieldNames` silently unlocks that field in every sidecar already on disk.
+
+---
+
+## 2026-11-13: One keyed sidecar per directory, not one per edition
+
+**Decision:** A single `bard.json` per directory, with an `editions` map keyed
+by each edition's file base name, or `"."` for an edition that is the directory
+itself. The file is written once per directory at the end of a scan, and only
+when its bytes would actually change.
+
+**Rationale:** The plan assumed one sidecar per *edition directory*, which holds
+only under the `Author/Series/## - Title/` convention. The walker deliberately
+supports flat layouts too — a shelf of M4Bs, an EPUB and a PDF side by side —
+and a single unkeyed file cannot describe those. Keying it costs one level of
+nesting and covers every layout the scanner accepts.
+
+Comparing before writing is what keeps a rescan from touching the media tree at
+all; otherwise every scan would restamp every `bard.json`, which is both noisy
+and a lie about what changed.
+
+**Alternatives Considered:** `<basename>.bard.json` beside each file, which
+scatters one small file per book through the library and reads worse than one
+file describing a directory.
+
+**Impact:** Entries for editions that have vanished are pruned on the next
+scan of their directory. A directory that loses *all* its books keeps its stale
+sidecar, since nothing visits it to clean up.
+
+---
+
+## 2026-11-13: A leading number is a series position only inside a series folder
+
+**Decision:** The path parser reads `## - Title` as an ordinal only when the
+candidate sits in a series directory, meaning there are at least two
+directories above the title.
+
+**Rationale:** Found while testing: `Marquez/100 Years of Solitude.epub` parsed
+as position 100 of an unnamed series with the title "Years of Solitude". Making
+the ordinal conditional on a series folder keeps the documented convention
+working while leaving numerically titled books alone. Capping a bare ordinal at
+three digits already protected `1984.epub` and `2001 A Space Odyssey.epub`,
+but not a title whose number is followed by more words.
+
+**Impact:** `Author/Series/01 - Title` parses fully; `Author/01 - Title` keeps
+the number in its title. Since the path is the lowest-precedence source, a wrong
+guess is overridden by anything the file itself says.
+
+---
+
+## 2026-11-12: MP3 duration comes from the VBR header, not from summing frames
+
+**Decision:** Read the encoder's Xing/Info or VBRI frame count where there is
+one, and otherwise estimate from the first frame's bitrate. Never walk every
+frame.
+
+**Rationale:** Summing frame headers is exact but reads the whole file, and a
+cold scan of 5000 titles cannot afford that — the header read is 8KB per file.
+The header's position has to be computed from the side-info size rather than
+searched for: an ID3 text field containing the word "Info" matches a naive scan,
+which the Doctorow sample demonstrates ("**Info**rmation Doesn't Want to Be
+Free").
+
+**Alternatives Considered:** `ffprobe` per file, which the plan reserves for
+chapter extraction and will not make a hard dependency. Parsing the LAME
+gapless delay and padding, which would close the last 40ms but adds a second
+binary layout to get wrong.
+
+**Impact:** Exact where a Xing count exists and the encoder wrote no gapless
+info; otherwise ~0.04s long per file, because the frame count includes the
+header frame and the LAME delay and padding are not subtracted. Measured
+against the same book in both formats: the MP3 set reports 58342.5s and the M4B
+58340.7s, a 1.7s drift over 16.2 hours, well inside the ±1–2 minute tolerance
+Decision 12 accepts for cross-edition handoff.
+
+---
+
+## 2026-11-12: Narrator comes from the composer tag, not the album artist
+
+**Decision:** For both M4B and MP3, the artist tag is the author and the
+composer tag is the narrator. Album artist is only a fallback author.
+
+**Rationale:** This is the iTunes audiobook convention and what other readers
+expect. Album artist is the ambiguous field — tools disagree over whether it
+names the author or the narrator, so trusting it would file some narrators as
+authors. None of the sample audiobooks set composer at all, so narrators stay
+empty until the Phase 8 providers fill them, which is the right outcome: an
+empty field is recoverable, a wrong one looks correct and never gets fixed.
+
+**Alternatives Considered:** Scraping the comment field, which in one sample
+reads "Read By Wil Wheaton". Rejected as fitting the parser to one publisher's
+habit rather than to a standard.
+
+**Impact:** Narrator is usually unknown after a scan of audio. Phase 8's
+Audnexus provider is what populates it.
+
+---
+
+## 2026-11-12: Covers are content-addressed, and only JPEG variants are kept
+
+**Decision:** The cover cache keys files on the SHA-256 of the source bytes and
+stores a full-size copy plus a variant per configured width, all re-encoded to
+JPEG. The original bytes are not kept, and no variant is ever upscaled.
+
+**Rationale:** Content addressing makes the dedup fall out for free, which the
+sample library proves worthwhile: Red Rising ships as both an M4B and 47 MP3s
+carrying identical art, and both editions point at one cached cover. Keeping
+only JPEG means paths are predictable without recording each cover's source
+format, and the original is safe to drop because disk is authoritative — a
+rescan re-extracts it.
+
+**Alternatives Considered:** Keying on the edition id, which would store the
+same art twice and need invalidating when it changes. Keeping the original
+alongside the variants, which costs a format column for no reader benefit.
+
+**Impact:** `editions.cover_hash` in migration 0006 is the only index; the file
+layout is otherwise self-describing. Covers orphaned by a metadata change are
+not collected yet, since a shared cover cannot be deleted without refcounting —
+a few KB each, left for Phase 12 maintenance.
+
+---
+
+## 2026-11-12: MP3s group on the set, M4Bs never group
+
+**Decision:** A directory's MP3s become one edition when a strict majority of
+their names carry a track prefix, or when they share a six-character prefix;
+otherwise each is its own edition. Multiple M4Bs in one directory are always
+separate editions. Subdirectories merge into one edition only when every one of
+them is named like a disc (`Disc 1`, `CD2`, `Part 3`) and holds nothing but
+MP3s.
+
+**Rationale:** A chapter-per-file audiobook and a drop folder of single-file
+audiobooks are identical file by file, so the signal has to come from the set.
+The two formats need opposite defaults: a flat `Audiobooks/*.m4b` shelf is a
+common layout and merging it would be catastrophic, while a flat folder of MP3s
+is usually one book.
+
+The disc guard is deliberately narrow because the rival reading of the same
+shape — a folder of per-book subdirectories — is commoner, and wrongly merging
+a shelf is far worse than splitting a rip, which a Phase 5 merge fixes once.
+
+A strict majority rather than unanimity on track prefixes means one stray
+`Bonus Interview.mp3` cannot shatter a thirty-part audiobook into thirty
+editions, which would need thirty manual merges to undo.
+
+**Alternatives Considered:** Requiring every name to be numbered (the stray-file
+shatter). Trusting the existing grouping in the index over what disk says
+(contradicts disk being authoritative). ID3 track numbers, which are a better
+signal but belong to 4.3.
+
+**Impact:** Two accepted misfilings, both fixable by Phase 5's split/merge: a
+drop folder whose names happen to share six characters merges, and bare numeric
+titles are separated from track numbers only by capping a bare track number at
+three digits, so `1984.mp3` is a title and `001.mp3` is a part. 4.3 should
+re-order parts from ID3 once it can read them.
+
+---
+
+## 2026-11-12: Shutdown requeues a job for free; a crash charges it an attempt
+
+**Decision:** A job interrupted by shutdown goes back to pending with its
+attempt count decremented. A job found in `running` at startup goes back to
+pending with the attempt it already spent left standing.
+
+**Rationale:** The two cases look identical in the table but are not. A SIGTERM
+during a scan is not the job's fault and must cost nothing, or a few restarts
+would exhaust `max_attempts` on healthy work. A job that killed the process is
+the opposite: letting it retry forever is a boot loop, so the spent attempt is
+what eventually parks it.
+
+Bookkeeping therefore runs on a context detached from the cancelled one, with a
+short timeout — otherwise the write recording a finished job is itself cancelled
+and the job runs again on the next boot.
+
+**Alternatives Considered:** A heartbeat column to tell a live worker from a
+dead one. Unnecessary while the pool is in-process, since at startup no running
+row can have a worker.
+
+**Impact:** `Release` and `Reclaim` are separate operations with deliberately
+different arithmetic. Pinned by `TestShutdownRequeuesWithoutChargingAnAttempt`
+and `TestReclaimRequeuesRunningJobs`.
+
+---
+
+## 2026-11-12: `bard source add` lands in Phase 4, ahead of the admin UI
+
+**Decision:** Phase 4.2 adds a minimal `bard source add|list` CLI, though the
+plan assigns source management to the Phase 11 admin UI.
+
+**Rationale:** Sources live in the database, not the config file, so without
+this verb `bard scan` has nothing to scan and Phase 4 cannot be exercised by
+hand at all — the alternative was telling the operator to write an `INSERT` by
+hand against `sources`.
+
+**Alternatives Considered:** Declaring sources in `bard.yml`. Rejected: it
+contradicts the plan's open assumption and would become a second source of
+truth the admin UI then has to reconcile.
+
+**Impact:** `add` warns when `default_min_age` is unset, since that fails closed
+for every restricted account. Phase 11 builds its UI on the same queries in
+`internal/scan/sources.go`, which is also where a proper store should land.
+
+---
+
+## 2026-11-12: Effective min age inherits from editions, not "the book's source"
+
+**Decision:** A book's effective minimum age is its own `min_age` if set,
+otherwise the most restrictive `default_min_age` across the sources its
+editions live in. `NULL` when any of those sources is undecided, or when the
+book has no editions, and `NULL` denies.
+
+**Rationale:** The v1 phase 3 schema was planned around a book inheriting from
+"its source", but a book has no single source — `source_id` lives on editions,
+so a book can have its EPUB in one source and its M4B in another. Taking the
+most restrictive fails closed.
+
+The SQL twin needs `COUNT(*) = COUNT(s.default_min_age)` rather than a bare
+`COALESCE(b.min_age, MAX(s.default_min_age))`: SQLite's `MAX` ignores NULLs, so
+the shorter form returns a permissive age for a book whose editions include an
+unrated source — failing open in the one case that must fail closed.
+
+**Alternatives Considered:** Least restrictive (fails open). Per-edition gating
+(a child could read the ebook but not hear the audiobook, which is confusing).
+Materialising the value at scan time (would need recomputation whenever a
+source default changes in the admin UI).
+
+**Impact:** `model.EffectiveMinAge` and `db.EffectiveMinAgeSQL` must agree;
+`TestEffectiveMinAgeMatchesSQL` runs both over the same fixtures. Phase 9
+filters in SQL and authorizes in Go, so divergence would let one allow what the
+other denies.
+
+---
+
+## 2026-11-12: No policy registry in the Go port
+
+**Decision:** Policies are constructed by typed functions
+(`NewDevicePolicy(actor, device)`). The explicit registry from
+`rails/policies/advanced` is omitted.
+
+**Rationale:** The Rails registry exists to avoid `.constantize` resolving an
+attacker-influenced string to a class (CWE-470). Go has no dynamic class
+lookup here, so there is no hazard to guard and a registry would add
+indirection without removing one. Action inference from a controller action
+name likewise has no Go equivalent, so callers name the action.
+
+**Alternatives Considered:** Building a registry anyway for symmetry with the
+pattern. Rejected as indirection with no safety benefit.
+
+**Impact:** Documented in the `internal/policy` package comment. The rest of the
+pattern is kept verbatim: structured `Result` over bool, `allow`/`deny` helpers
+only, unexported boolean role helpers, single-point message resolution.
+
+---
+
+## 2026-11-12: Reason coverage is a test, not a convention
+
+**Decision:** `allReasons` enumerates every `policy.Reason`, and a test asserts
+each resolves to a distinct non-default message.
+
+**Rationale:** The Rails pattern notes that a `deny(:foo)` with no matching
+`when :foo` silently degrades to "Not authorized", defeating the point of
+carrying reasons. In Go that can be a build failure instead of a review
+comment. Verified by adding an uncovered reason and watching the test fail.
+
+**Impact:** Adding a `Reason` without a message breaks CI.
+
+---
+
+## 2026-11-12: Managed profiles derive from owner_id; PIN gates the switch back
+
+**Decision:** A device row carries `owner_id` (who logged in) and
+`active_user_id` (the selected profile). The switchable set is the owner plus
+managed users owned by it. Switching into a profile that has a PIN requires it.
+
+**Rationale:** A per-device list of assumable profiles was planned; deriving
+from `owner_id` means one less table and no way for the list to drift from
+reality. Keeping the token stable while `active_user_id` changes
+is how a profile picker actually works on a shared device.
+
+Because the switchable set is shared by every profile on the device, a PIN on
+the owner's profile is the only thing stopping a child from switching into it —
+and therefore from bypassing every age restriction in phase 9.
+
+**Alternatives Considered:** Issuing a new token per profile switch (then
+switching back needs the original token). An explicit per-device allowlist
+(more state, same outcome).
+
+**Impact:** Phase 9's age gating is only as strong as the owner's PIN. The admin
+UI should push for one.
+
+---
+
+## 2026-11-12: Pure-Go SQLite accepted at a write-throughput cost
+
+**Decision:** `modernc.org/sqlite` over the cgo `mattn/go-sqlite3`.
+
+**Rationale:** Roughly 2–3× slower on writes, but gives a genuinely static
+binary, `GOOS=linux GOARCH=arm64 go build` with no C toolchain, and a trivial
+release matrix. Writes happen during scans and progress updates, where tens of
+seconds of extra wall-clock is unobservable.
+
+**Alternatives Considered:** cgo for speed. Both are `database/sql` drivers, so
+this is a one-line reversal if a benchmark ever justifies it.
+
+**Impact:** `CGO_ENABLED=0` everywhere. Revisit only with a real benchmark.
+
+---
+
+## 2026-11-12: Default port 2273 kept despite an IANA assignment
+
+**Decision:** Default to 2273, configurable.
+
+**Rationale:** "BARD" on a phone keypad, in the registered range, clear of the
+ephemeral range, and no collision with Plex, Jellyfin, Audiobookshelf, or the
+*arr suite. IANA lists it as `mysql-im` (MySQL Instance Manager, 2004), a tool
+removed from MySQL in 2010, so real collision risk is nil.
+
+**Alternatives Considered:** Hunting for a wholly unassigned port. Not worth it
+once the port is configurable, which is also what Plex does with 32400.
+
+**Impact:** None beyond documenting it.
+
+---

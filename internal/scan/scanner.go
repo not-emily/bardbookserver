@@ -14,6 +14,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/media"
 	"github.com/not-emily/bardbookserver/internal/metadata"
 	"github.com/not-emily/bardbookserver/internal/metadata/embedded"
+	"github.com/not-emily/bardbookserver/internal/metadata/provider"
 	"github.com/not-emily/bardbookserver/internal/metadata/sidecar"
 	"github.com/not-emily/bardbookserver/internal/model"
 )
@@ -27,13 +28,16 @@ type SourcePayload struct {
 // Scanner reconciles disk against the index. Disk is authoritative: a vanished
 // file takes its row with it, and nothing here renames or moves anything.
 type Scanner struct {
-	db     *sql.DB
-	covers *media.Cache
-	logger *slog.Logger
+	db        *sql.DB
+	covers    *media.Cache
+	providers *provider.Registry
+	logger    *slog.Logger
 }
 
-func NewScanner(db *sql.DB, covers *media.Cache, logger *slog.Logger) *Scanner {
-	return &Scanner{db: db, covers: covers, logger: logger}
+// A nil registry is a scan with no provider enabled, which is the default and
+// makes no outbound request.
+func NewScanner(db *sql.DB, covers *media.Cache, providers *provider.Registry, logger *slog.Logger) *Scanner {
+	return &Scanner{db: db, covers: covers, providers: providers, logger: logger}
 }
 
 func (s *Scanner) Register(p *jobs.Pool) {
@@ -64,6 +68,7 @@ func (s *Scanner) handleScanSource(ctx context.Context, j *jobs.Job) error {
 		"editions_added", res.EditionsAdded, "editions_removed", res.EditionsRemoved,
 		"files_added", res.FilesAdded, "files_updated", res.FilesUpdated,
 		"files_removed", res.FilesRemoved, "metadata_applied", res.MetadataApplied,
+		"metadata_enriched", res.MetadataEnriched,
 		"covers_stored", res.CoversStored, "sidecars_written", res.SidecarsWritten,
 		"editions_grouped", res.EditionsGrouped, "editions_regrouped", res.EditionsRegrouped,
 		"books_reaped", res.BooksReaped, "warnings", len(res.Warnings))
@@ -76,16 +81,17 @@ type Result struct {
 	SourceID   int64
 	SourceName string
 
-	Candidates      int
-	Unchanged       int
-	EditionsAdded   int
-	EditionsRemoved int
-	FilesAdded      int
-	FilesUpdated    int
-	FilesRemoved    int
-	MetadataApplied int
-	CoversStored    int
-	SidecarsWritten int
+	Candidates       int
+	Unchanged        int
+	EditionsAdded    int
+	EditionsRemoved  int
+	FilesAdded       int
+	FilesUpdated     int
+	FilesRemoved     int
+	MetadataApplied  int
+	MetadataEnriched int
+	CoversStored     int
+	SidecarsWritten  int
 
 	EditionsGrouped   int
 	EditionsRegrouped int
@@ -312,15 +318,29 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 		if parsed, err = embedded.Parse(c.Format, c.paths()); err != nil {
 			res.Warnings = append(res.Warnings, err)
 		}
+
 		// Highest precedence first. The sidecar appears twice on purpose: its
 		// locked fields outrank the file, the rest only fills what nothing
-		// else could re-derive. Phase 8 inserts providers after the locks.
-		md = metadata.Resolve(
+		// else could re-derive.
+		local := metadata.Resolve(
 			entry.LockedMetadata(),
 			parsed.Metadata,
 			pathMetadata(src.Path, c),
 			entry.Metadata(),
 		)
+
+		// Asked with everything known locally, because an untagged file knows
+		// its title only from its path — and outside the transaction below,
+		// since a provider taking ten seconds must not hold a write lock.
+		online, warnings := s.providers.Lookup(ctx,
+			provider.QueryFor(local, c.Format.Kind(), model.ParseFields(entry.Locked)))
+		res.Warnings = append(res.Warnings, warnings...)
+		if !online.Empty() {
+			res.MetadataEnriched++
+		}
+
+		// The provider slots above the file and below the locks.
+		md = metadata.Resolve(entry.LockedMetadata(), online, local)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)

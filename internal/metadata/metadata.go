@@ -44,6 +44,15 @@ type Cover struct {
 	MIME string
 }
 
+// Empty reports whether a source learned anything at all, which is how a
+// caller tells "the provider answered" from "nothing matched".
+func (m Metadata) Empty() bool {
+	return m.Title == "" && m.Description == "" && len(m.Authors) == 0 &&
+		len(m.Narrators) == 0 && len(m.Subjects) == 0 && len(m.Chapters) == 0 &&
+		m.ISBN == "" && m.ASIN == "" && m.Cover == nil &&
+		m.PageCount == nil && m.DurationSeconds == nil
+}
+
 // Resolve merges sources highest precedence first, each filling only what the
 // earlier ones left unknown. Callers choose the order — sidecar, then
 // embedded, then path convention, with providers landing between the first two

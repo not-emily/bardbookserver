@@ -122,13 +122,13 @@ func buildEPUB(pkg *opfPackage, entries map[string]*zip.File, opfPath string) me
 		md.Subtitle = pkg.Metadata.Titles[1]
 	}
 	if len(pkg.Metadata.Languages) > 0 {
-		md.Language = normalizeLanguage(pkg.Metadata.Languages[0])
+		md.Language = metadata.NormalizeLanguage(pkg.Metadata.Languages[0])
 	}
 	if len(pkg.Metadata.Publishers) > 0 {
 		md.Publisher = pkg.Metadata.Publishers[0]
 	}
 	if len(pkg.Metadata.Dates) > 0 {
-		md.PublishedOn = normalizeDate(pkg.Metadata.Dates[0])
+		md.PublishedOn = metadata.NormalizeDate(pkg.Metadata.Dates[0])
 	}
 	if len(pkg.Metadata.Descriptions) > 0 {
 		md.Description = pkg.Metadata.Descriptions[0]
@@ -193,7 +193,7 @@ func epubIdentifiers(pkg *opfPackage) (isbn, asin string) {
 
 		switch {
 		case scheme == "ISBN" || strings.HasPrefix(lower, "urn:isbn:"):
-			if v := normalizeISBN(strings.TrimPrefix(lower, "urn:isbn:")); v != "" && isbn == "" {
+			if v := metadata.NormalizeISBN(strings.TrimPrefix(lower, "urn:isbn:")); v != "" && isbn == "" {
 				isbn = v
 			}
 		case strings.Contains(scheme, "ASIN") || scheme == "AMAZON":
@@ -206,7 +206,7 @@ func epubIdentifiers(pkg *opfPackage) (isbn, asin string) {
 	for _, m := range pkg.Metadata.Metas {
 		switch strings.ToLower(m.Name) {
 		case "calibre:isbn":
-			if v := normalizeISBN(m.Content); v != "" && isbn == "" {
+			if v := metadata.NormalizeISBN(m.Content); v != "" && isbn == "" {
 				isbn = v
 			}
 		case "calibre:asin", "calibre:amazon":

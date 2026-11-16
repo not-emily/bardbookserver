@@ -31,7 +31,7 @@ func ParsePDF(path string) (metadata.Metadata, error) {
 	md := metadata.Metadata{
 		Title:       strings.TrimSpace(info.Title),
 		Subjects:    info.Keywords,
-		PublishedOn: normalizeDate(pdfDate(info.CreationDate)),
+		PublishedOn: metadata.NormalizeDate(pdfDate(info.CreationDate)),
 	}
 	if author := strings.TrimSpace(info.Author); author != "" {
 		md.Authors = splitPeople(author)
@@ -86,7 +86,7 @@ func pdfCover(f *os.File, conf *model.Configuration) *metadata.Cover {
 	return &metadata.Cover{Data: best, MIME: mime}
 }
 
-// pdfDate converts the PDF D:YYYYMMDD form to something normalizeDate reads.
+// pdfDate converts the PDF D:YYYYMMDD form to something NormalizeDate reads.
 func pdfDate(v string) string {
 	v = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), "D:"))
 	if len(v) < 4 {

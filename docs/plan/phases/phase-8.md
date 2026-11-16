@@ -20,6 +20,14 @@ Enrich scanned books from online providers, normalize the genre data they return
 - Suggested `min_age` derived from BISAC prefixes and `maturityRating` — stored as a suggestion, never applied
 - Per-provider rate limiting, backoff, and response caching
 
+**Pulled into 8.1 from 8.3:** match scoring. A lookup with no score picks
+whatever a search returns first, so the threshold had to exist before the first
+provider could be trusted unattended. Candidate ranking for Fix Match and the
+endpoint itself stay in 8.3.
+
+**Migration is `0010_metadata.sql`,** not `0008`: Phase 7 took `0008` and
+`0009`. Migrations are applied in filename order and forward only.
+
 ## Files to Create
 
 - `internal/metadata/provider/provider.go` — interface, registry, toggles
@@ -78,15 +86,16 @@ Metadata lookup sends titles to third parties, so every provider is off until ex
 
 ## Validation
 
-- [ ] A scanned book with an ISBN populates title, author, description, genre, and cover from a provider
+- [x] A scanned book with an ISBN populates title, author, description, genre, and cover from a provider
+      *(8.1: genre needs 8.4's taxonomy; subjects are retrieved and capped)*
 - [ ] An audiobook with an ASIN gets narrator and chapters from Audnexus
 - [ ] Local `chpl` chapters win over provider chapters when both exist
-- [ ] A hand-edited title survives a metadata refresh
+- [x] A hand-edited title survives a metadata refresh
 - [ ] Fix Match search returns ranked candidates and applying one replaces the metadata
-- [ ] A provider returning 500 or timing out leaves the scan successful with embedded metadata
-- [ ] All providers disabled means no outbound HTTP during a scan
-- [ ] Repeated scans do not re-request cached lookups
-- [ ] Rate limiting holds a backfill within each provider's documented limits
+- [x] A provider returning 500 or timing out leaves the scan successful with embedded metadata
+- [x] All providers disabled means no outbound HTTP during a scan
+- [x] Repeated scans do not re-request cached lookups
+- [x] Rate limiting holds a backfill within each provider's documented limits
 - [ ] Known-dirty subject strings map to one canonical genre
 - [ ] An unmappable subject is retained in `raw_subjects`
 - [ ] A `JUV`-prefixed BISAC code produces a suggested age and leaves `books.min_age` untouched

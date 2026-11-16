@@ -25,7 +25,7 @@ func sidecarScanner(t *testing.T, root string, writeSidecars bool) (*Scanner, *d
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewScanner(d.DB, media.NewCache(t.TempDir()), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s := NewScanner(d.DB, media.NewCache(t.TempDir()), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s, d, src.ID
 }
 

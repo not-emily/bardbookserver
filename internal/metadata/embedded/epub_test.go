@@ -320,45 +320,6 @@ func equal(a, b []string) bool {
 	return true
 }
 
-func TestNormalizeISBN(t *testing.T) {
-	cases := map[string]string{
-		"978-0-618-57498-6":           "9780618574986",
-		"0-441-17271-7":               "0441172717",
-		"043942089X":                  "043942089X",
-		"http://www.gutenberg.org/45": "",
-		"":                            "",
-		"12345":                       "",
-		"X441172717":                  "",
-	}
-	for in, want := range cases {
-		if got := normalizeISBN(in); got != want {
-			t.Errorf("normalizeISBN(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestNormalizeLanguageAndDate(t *testing.T) {
-	langs := map[string]string{
-		"en-GB": "en", "EN": "en", "eng": "eng", "": "", "english": "",
-		"XXX": "", "und": "", "zxx": "",
-	}
-	for in, want := range langs {
-		if got := normalizeLanguage(in); got != want {
-			t.Errorf("normalizeLanguage(%q) = %q, want %q", in, got, want)
-		}
-	}
-	dates := map[string]string{
-		"1954-07-29T00:00:00Z": "1954-07-29",
-		"1937":                 "1937",
-		"not a date":           "",
-	}
-	for in, want := range dates {
-		if got := normalizeDate(in); got != want {
-			t.Errorf("normalizeDate(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestRealEPUBsParse(t *testing.T) {
 	// Gutenberg files carry both nav flavours and no ISBN, which is why they
 	// are worth running against when they happen to be on the machine.

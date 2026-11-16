@@ -6,7 +6,9 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +21,16 @@ const (
 	TLSFiles = "files"
 )
 
+// Provider names are declared here because this is the config schema a typo
+// lands in, and a provider that silently never runs is the worst answer.
+const (
+	ProviderOpenLibrary = "openlibrary"
+	ProviderGoogleBooks = "googlebooks"
+	ProviderAudnexus    = "audnexus"
+)
+
+var providerNames = []string{ProviderOpenLibrary, ProviderGoogleBooks, ProviderAudnexus}
+
 type Config struct {
 	DataDir        string   `yaml:"data_dir"`
 	BindAddr       string   `yaml:"bind_addr"`
@@ -27,8 +39,23 @@ type Config struct {
 	Workers        int      `yaml:"workers"`
 	LogLevel       string   `yaml:"log_level"`
 	TLS            TLS      `yaml:"tls"`
+	Metadata       Metadata `yaml:"metadata"`
 
 	trustedPrefixes []netip.Prefix
+}
+
+// Metadata configures the online providers. Every one is off until named here,
+// because a lookup sends a title the user owns to a third party.
+type Metadata struct {
+	Providers      map[string]bool `yaml:"providers"`
+	GoogleBooksKey string          `yaml:"google_books_key"`
+	TimeoutSeconds int             `yaml:"timeout_seconds"`
+}
+
+func (m Metadata) ProviderEnabled(name string) bool { return m.Providers[name] }
+
+func (m Metadata) Timeout() time.Duration {
+	return time.Duration(m.TimeoutSeconds) * time.Second
 }
 
 // TLS is parsed and validated here but not wired until v1 phase 12; Bard runs
@@ -49,6 +76,7 @@ func defaults() Config {
 		Workers:        2,
 		LogLevel:       "info",
 		TLS:            TLS{Mode: TLSOff},
+		Metadata:       Metadata{TimeoutSeconds: 10},
 	}
 }
 
@@ -134,6 +162,16 @@ func (c *Config) validate() error {
 		}
 	default:
 		return fmt.Errorf("tls.mode: %q must be one of off, auto, files", c.TLS.Mode)
+	}
+
+	for name := range c.Metadata.Providers {
+		if !slices.Contains(providerNames, name) {
+			return fmt.Errorf("metadata.providers: %q is not a provider; known providers are %s",
+				name, strings.Join(providerNames, ", "))
+		}
+	}
+	if c.Metadata.TimeoutSeconds < 1 {
+		return fmt.Errorf("metadata.timeout_seconds: %d must be at least 1", c.Metadata.TimeoutSeconds)
 	}
 
 	prefixes, err := parseProxies(c.TrustedProxies)

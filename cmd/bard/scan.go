@@ -15,6 +15,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/jobs"
 	"github.com/not-emily/bardbookserver/internal/media"
+	"github.com/not-emily/bardbookserver/internal/metadata/provider"
 	"github.com/not-emily/bardbookserver/internal/model"
 	"github.com/not-emily/bardbookserver/internal/scan"
 )
@@ -53,7 +54,11 @@ func cmdScan(args []string) error {
 
 	queue := jobs.NewQueue(database.DB)
 	pool := jobs.NewPool(queue, cfg.Workers, logger)
-	scan.NewScanner(database.DB, media.NewCache(cfg.CoverCacheDir()), logger).Register(pool)
+	providers := provider.New(cfg.Metadata, database.DB, logger)
+	if providers.Enabled() {
+		logger.Info("metadata providers enabled", "providers", providers.Names())
+	}
+	scan.NewScanner(database.DB, media.NewCache(cfg.CoverCacheDir()), providers, logger).Register(pool)
 
 	for _, src := range sources {
 		switch _, err := scan.EnqueueSource(ctx, queue, src.ID); {

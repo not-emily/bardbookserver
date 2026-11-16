@@ -34,7 +34,8 @@ func testScanner(t *testing.T, root string) (*Scanner, *db.DB, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewScanner(d.DB, media.NewCache(t.TempDir()), slog.New(slog.NewTextHandler(io.Discard, nil))), d, src.ID
+	return NewScanner(d.DB, media.NewCache(t.TempDir()), nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil))), d, src.ID
 }
 
 func mustScan(t *testing.T, s *Scanner, sourceID int64) *Result {
