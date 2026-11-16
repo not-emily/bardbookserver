@@ -38,6 +38,9 @@ type bookDTO struct {
 	Percent      *float64 `json:"percent,omitempty"`
 	Saved        bool     `json:"saved"`
 	Rating       *int     `json:"rating,omitempty"`
+
+	Locked      bool `json:"locked,omitempty"`
+	RequiredAge *int `json:"required_age,omitempty"`
 }
 
 // newBookDTO is explicit rather than a serialized model: a book row carries
@@ -64,6 +67,12 @@ func newBookDTO(row *db.BookRow) bookDTO {
 		Percent:           row.FurthestPercent,
 		Saved:             row.Saved,
 		Rating:            row.Rating,
+		Locked:            row.Locked,
+	}
+	// Only when locked: the age a book unlocks at is what a locked card has to
+	// show, and nothing else needs the book's min_age.
+	if row.Locked {
+		dto.RequiredAge = row.RequiredAge
 	}
 	if row.SeriesID != nil {
 		dto.Series = &seriesRefDTO{

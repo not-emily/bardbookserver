@@ -58,6 +58,9 @@ func (s *Server) handleHandoff(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.mayRead(w, r, fromBook) {
+		return
+	}
 	if fromBook != toBook {
 		writeError(w, http.StatusBadRequest, "both editions must belong to one book")
 		return

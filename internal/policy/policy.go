@@ -16,6 +16,8 @@
 // callers name the action they are authorizing.
 package policy
 
+import "fmt"
+
 type Reason string
 
 const (
@@ -25,6 +27,10 @@ const (
 	ReasonPINRequired   Reason = "pin_required"
 	ReasonPINIncorrect  Reason = "pin_incorrect"
 	ReasonNotSwitchable Reason = "not_switchable"
+
+	ReasonExplicitlyDenied Reason = "explicitly_denied"
+	ReasonBelowMinAge      Reason = "below_min_age"
+	ReasonUnrated          Reason = "unrated"
 )
 
 // allReasons exists so a test can assert every reason resolves to a message.
@@ -37,6 +43,9 @@ var allReasons = []Reason{
 	ReasonPINRequired,
 	ReasonPINIncorrect,
 	ReasonNotSwitchable,
+	ReasonExplicitlyDenied,
+	ReasonBelowMinAge,
+	ReasonUnrated,
 }
 
 const defaultMessage = "Not authorized"
@@ -70,6 +79,15 @@ func Message(r Result) string {
 		return "That PIN is not right"
 	case ReasonNotSwitchable:
 		return "That profile is not available on this device"
+	case ReasonExplicitlyDenied:
+		return "A parent blocked this one"
+	case ReasonBelowMinAge:
+		if age, ok := r.Meta["required_age"].(int); ok {
+			return fmt.Sprintf("You can read this at %d", age)
+		}
+		return "You are not old enough for this one yet"
+	case ReasonUnrated:
+		return "Nobody has rated this one yet — ask a parent"
 	default:
 		return defaultMessage
 	}

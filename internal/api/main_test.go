@@ -404,6 +404,11 @@ func (h *harness) reindex(bookIDs ...int64) {
 	}
 }
 
+func (h *harness) getJSONAs(path, token string, dst any) {
+	h.t.Helper()
+	h.decode(h.getAs(path, token), dst)
+}
+
 func ptr[T any](v T) *T { return &v }
 
 // sourceRoot is distinctive so a test can assert no response leaks it.

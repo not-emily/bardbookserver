@@ -27,6 +27,10 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.mayRead(w, r, loc.BookID) {
+		return
+	}
+
 	etag := media.FileETag(loc.ID, loc.SizeBytes, loc.ModifiedAt, loc.ContentHash)
 	name := media.DownloadName(loc.BookTitle, loc.Format)
 

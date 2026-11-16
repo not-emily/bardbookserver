@@ -2,33 +2,29 @@
 
 ## Plan Files
 Roadmap: [plan.md](../docs/plan/plan.md)
-Current Phase: [phase-8.md](../docs/plan/phases/phase-8.md)
+Current Phase: [phase-10.md](../docs/plan/phases/phase-10.md)
 Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 8 is complete. All four sub-phases are in: three providers, Fix Match,
-and the taxonomy. Every empty facet this phase existed to fill — narrator,
-genre, and page count for EPUBs — now has a source. Phase 9 (age gating) is
-next and its suggested ages are already being written.
+Phase 9 is complete, so Phases 8 and 9 both landed this session. Age-restricted
+accounts work and are verified leak-free across every read path. Phases 10, 11
+and 12 remain, and 10 is independent of everything shipped.
 
 ## Active Tasks
-- [DONE] Phase 8: Metadata providers & taxonomy
-  - ✅ 8.1: `Provider` interface, explicit registry, config toggles off by
-    default, Open Library, response caching, rate limiting, match scoring
-  - ✅ 8.2: Google Books with a daily-quota breaker, Audnexus with narrators
-    and chapters, plus the M4B ASIN extraction Audnexus cannot work without
-  - ✅ 8.3: candidate ranking, Fix Match over `/api/v1/books/{id}/match`,
-    pinned matches honoured by a rescan, locks and sidecar written on apply
-  - ✅ 8.4: 44 canonical genres, BISAC parser shared with the age suggestion,
-    ~230 subject aliases, `raw_subjects` retention, `suggested_min_age`
-- [NEXT] Phase 9: Kids & age gating — `birth_date`, `min_age`, overrides, the
-  View/Read/Save split, unlocked-first sort, and the suggestion queue
-- [LATER] Phase 10 (upload), 11 (admin UI), 12 (packaging)
-- [LATER] Phase 9 (age gating) — extends `BookScope.Apply`; wants Phase 8's
-  suggested ages but can be built against hand-set ones
-- [LATER] Phase 10 (upload) — independent of 8 and 9
+- [DONE] Phase 8: Metadata providers & taxonomy (all four sub-phases)
+- [DONE] Phase 9: Kids & age gating
+  - ✅ The gate rides on `db.Query`, set by `BookScope.Apply`, so no read path
+    can be assembled without it
+  - ✅ `BookPolicy` with the View/Read/Save split and the full ladder
+  - ✅ Per-user allow/deny overrides, admin-only
+  - ✅ SQL-computed `unlocked`, used for the filter and the sort
+  - ✅ `locked` and `required_age` in list and detail responses
+  - ✅ Leak test across list, search, facets, facet counts, series,
+    collections, sync, history, detail-by-id, file-by-id and cover-by-id
+- [NEXT] Phase 10: Upload — resumable chunked upload, ingest, admin-only
+- [LATER] Phase 11 (admin UI, consumes 8/9/10), 12 (packaging & release)
 
 ## Test Media
 Real books live in `../sample-media`, outside the repo, and never go into it.
@@ -86,10 +82,9 @@ Nothing is blocked. These are known limitations carried forward.
   the expression needs it three times and `db.Query` concatenates arguments
   positionally. Safe as an int64 from the session, but any future facet that
   binds arguments near it needs care.
-- Phase 9 inserts the age ladder into `BookScope.Apply` and adds `BookPolicy`
-  beside it. Every read path — listings, search, facets, by-id detail, file
-  content, covers, progress, annotations and the sync manifest — resolves
-  through that scope, so the change is in one function.
+- A query built without `BookScope.Apply` carries a zero `db.Gate`, which gates
+  nothing. Every read path composes through `scopedBooks`, and the leak test is
+  what holds that true.
 - Annotation positions are stored as the client sends them (CFI, page,
   seconds). Nothing validates that a CFI belongs to the edition it is filed
   under, so a buggy client can store an unresolvable highlight.
@@ -103,7 +98,20 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-16] Phase 8.4: the taxonomy (uncommitted)
+- [2026-11-16] Phase 9: kids and age gating (uncommitted)
+  - The gate lives on the query rather than being passed to twenty call sites,
+    so forgetting it is not expressible
+  - The age is computed once in Go, not twice: deriving it in SQL would be a
+    second twin beside `EffectiveMinAge`, and one is enough
+  - Decided while testing: an unrated book is **locked, not hidden**. "Ask a
+    parent" is a message for a card you can see, and hiding it would make the
+    reason code unreachable
+  - `required_age` is surfaced only on a locked book, so no reader learns
+    another book's `min_age`
+  - The leak test was verified by neutering the scope's age condition and
+    watching list, search and detail all fail
+  - 409 tests pass, race-clean
+- [2026-11-16] Phase 8.4: the taxonomy (committed, 3597550)
   - 44 canonical genres, flat, with the row inserted on demand so the table
     cannot drift from the list and the facet lists only what exists
   - One BISAC parser serving both the genre facet and the age suggestion
@@ -210,22 +218,31 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 9: kids and age gating.
+Phase 10: upload.
 
-What is ready: `books.suggested_min_age` is already being written, so the
-Phase 11 confirmation queue has data to show and Phase 9 can be tested against
-both hand-set and suggested ages. `model.EffectiveMinAge` and
-`db.EffectiveMinAgeSQL` exist from Phase 3 with `TestEffectiveMinAgeMatchesSQL`
-holding them together. `BookScope.Apply` is the one function every read path
-composes through — listings, search, facets, by-id detail, file content,
-covers, progress, annotations and the sync manifest — so the age ladder goes in
-one place.
+What is ready: `users.can_upload` exists from Phase 2 and nothing reads it yet,
+so the permission check has its column. The scanner's reconciler is what an
+ingested file has to land in front of, and `scan.EnqueueSource` collapses into
+a scan already queued, so ingest can trigger one without a stampede. Bard never
+renames or moves existing files — upload ingest is the only place it writes
+media, which is the constraint the destination path logic has to respect.
 
-What Phase 9 has to add: `BookPolicy` beside the scope with the View/Read/Save
-split, per-user allow/deny overrides, `hide_when_locked` honoured per source,
-and the SQL-computed `unlocked` sort key — it has to be SQL because sorting and
-pagination both depend on it.
+What Phase 10 has to decide: where an uploaded file lands (which source, which
+directory, under what name), and how a resumable chunked upload is tracked
+across requests — a `uploads` table with a session id and received ranges is
+the obvious shape, and it needs a sweep for abandoned ones.
 
-Worth deciding early: a locked book is still saveable to a user's space, and
-the plan wants it sorted below readable ones rather than hidden, except where
-the source says otherwise.
+## Carried over from Phase 9
+Nothing blocking. Worth knowing:
+
+- `BookPolicy.View` and `Save` are the same check today, since the only thing
+  that forbids viewing is a deny override. They are separate methods because
+  Decision 7 splits them, and Phase 11's rating queue may give `View` more to
+  do.
+- A deny override removes a book from the scope, so `ReasonExplicitlyDenied`
+  is never reached through a read path — the policy returns it, and the policy
+  test covers it, as defence in depth.
+- Ratings and reading state can still be set on a locked book. Only the paths
+  that hand over contents — file, progress, annotations, handoff — check
+  `Read`. A rating on a book you cannot open is harmless and arguably useful.
+

@@ -92,7 +92,7 @@ func (s *Server) handleSetProgress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.editionInScope(w, r, editionID) {
+	if !s.editionReadable(w, r, editionID) {
 		return
 	}
 

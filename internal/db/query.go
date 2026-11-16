@@ -27,6 +27,10 @@ type Query struct {
 
 	limit  int
 	offset int
+
+	// gate rides on the query so a read cannot be assembled without it: the
+	// scope is what sets it, and every read path composes through the scope.
+	gate Gate
 }
 
 func NewQuery(table string) *Query {
@@ -90,8 +94,16 @@ func (q *Query) Clone() *Query {
 		orders:    append([]string(nil), q.orders...),
 		limit:     q.limit,
 		offset:    q.offset,
+		gate:      q.gate,
 	}
 }
+
+func (q *Query) WithGate(g Gate) *Query {
+	q.gate = g
+	return q
+}
+
+func (q *Query) Gate() Gate { return q.gate }
 
 func (q *Query) SQL() (string, []any) {
 	var b strings.Builder

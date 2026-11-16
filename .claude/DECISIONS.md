@@ -3,6 +3,66 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-16: The gate rides on the query, so no read path can omit it
+
+**Decision:** `db.Gate` — the account id, whether it is restricted, and its age
+— is stored on the `db.Query` itself by `BookScope.Apply`. The columns, the
+sort and the filters all read it off the query rather than taking it as a
+parameter.
+
+**Rationale:** Every read path already composes through `scopedBooks`, which is
+the single call to `BookScope.Apply`. Putting the gate there means a listing,
+a search, a facet count and a by-id fetch are all gated by construction, with
+no new argument at any of the twenty-odd call sites and no way to assemble a
+book query that forgot to. The alternative — threading a gate parameter
+through `Books`, `Book`, `ApplyBookSort`, `ApplyBookFilters` and `FacetValues`
+— is the same safety resting on twenty call sites being right.
+
+The age is computed once in Go from the authenticated user and interpolated,
+rather than derived from `birth_date` in SQL. SQL could do it, but that would
+be a second Go/SQL twin to keep aligned, and this phase already has one in
+`EffectiveMinAge`. One twin is a documented hazard; two is a pattern.
+
+**Alternatives Considered:** A gate parameter on every read function, as
+above. Computing the age in SQL from `birth_date`, which adds the twin.
+Resolving the gate inside `db` from the user id, which puts a query inside
+every other query.
+
+**Impact:** The zero `Gate` gates nothing, so a query built without the scope
+fails open — which is why `TestNoReadPathLeaksALockedBook` was verified by
+neutering the scope and watching it fail across list, search and detail.
+`Clone` copies the gate, since `Books` and `CountBooks` both clone.
+
+---
+
+## 2026-11-16: An unrated book is locked, not hidden
+
+**Decision:** A book whose effective `min_age` is NULL is visible to a
+restricted account and marked `locked` with no `required_age`. Only a source
+with `hide_when_locked` removes a book outright.
+
+**Rationale:** Caught by writing the leak test and asserting the wrong thing:
+I had expected an unrated book to be absent. But `ReasonUnrated` reads "Nobody
+has rated this one yet — ask a parent", which is a message for a card someone
+can see. Hiding the book would make the reason unreachable and leave a child
+with no way to ask.
+
+It also keeps the two mechanisms distinct, which Decision 7 wants: *unrated*
+is a gap in the library's data and shows as a locked card; *hidden* is a
+deliberate per-source choice and shows as nothing at all.
+
+`required_age` is omitted rather than zero, because there is no age — a client
+shows "ask a parent" instead of a number.
+
+**Alternatives Considered:** Hiding unrated books from restricted accounts,
+which fails safe but silently shrinks the library and makes the reason code
+dead. Treating a missing age as 18, which invents a rating nobody set.
+
+**Impact:** `required_age` is surfaced only on a locked book, so an
+unrestricted reader never sees another book's `min_age`.
+
+---
+
 ## 2026-11-16: The genre list is flat, and genres are created on demand
 
 **Decision:** `taxonomy.Canonical` is 44 flat genres with no hierarchy, and a

@@ -73,16 +73,23 @@ type BookRow struct {
 	FurthestPercent *float64
 	Saved           bool
 	Rating          *int
+
+	// Locked means visible but not yet readable by this account. RequiredAge
+	// is the age it unlocks at, which is why it is reported alongside.
+	Locked      bool
+	RequiredAge *int
 }
 
 // bookColumns ends with the per-account columns, so a listing carries the
 // reader's own state without a second query.
-func bookColumns(userID int64) string {
+func bookColumns(userID int64, gate Gate) string {
 	return sharedBookColumns +
 		`, ` + ReadingStateSQL(BooksAlias, userID) + ` AS reading_state` +
 		`, ` + FurthestPercentSQL(BooksAlias, userID) + ` AS furthest_percent` +
 		`, ` + savedSQL(BooksAlias, userID) + ` AS saved` +
-		`, ` + ratingSQL(BooksAlias, userID) + ` AS rating`
+		`, ` + ratingSQL(BooksAlias, userID) + ` AS rating` +
+		`, ` + UnlockedSQL(BooksAlias, gate) + ` AS unlocked` +
+		`, ` + EffectiveMinAgeSQL(BooksAlias) + ` AS required_age`
 }
 
 // group_concat takes no ORDER BY in the SQLite builds we support, so each
@@ -129,7 +136,7 @@ const sharedBookColumns = `
 
 // Books leaves the caller's query untouched so it can still be counted.
 func (d *DB) Books(ctx context.Context, q *Query, userID int64) ([]BookRow, error) {
-	query, args := q.Clone().Select(bookColumns(userID)).SQL()
+	query, args := q.Clone().Select(bookColumns(userID, q.Gate())).SQL()
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -151,7 +158,7 @@ func (d *DB) Books(ctx context.Context, q *Query, userID int64) ([]BookRow, erro
 // Book reads one book through a query already narrowed to its id, so the
 // scope decides whether it exists for this account.
 func (d *DB) Book(ctx context.Context, q *Query, userID int64) (*BookRow, error) {
-	query, args := q.Clone().Select(bookColumns(userID)).Limit(1).SQL()
+	query, args := q.Clone().Select(bookColumns(userID, q.Gate())).Limit(1).SQL()
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -189,6 +196,8 @@ func scanBookRow(rows *sql.Rows) (*BookRow, error) {
 		readingState, saved                           string
 		furthest                                      sql.NullFloat64
 		rating                                        sql.NullInt64
+		unlocked                                      int
+		requiredAge                                   sql.NullInt64
 	)
 
 	if err := rows.Scan(
@@ -197,9 +206,15 @@ func scanBookRow(rows *sql.Rows) (*BookRow, error) {
 		&authors, &row.AuthorSort, &narrators, &formats, &kinds, &languages,
 		&row.CoverHash, &row.EditionCount, &duration, &pageCount,
 		&row.PublishedOn, &confidence, &readingState, &furthest,
-		&saved, &rating,
+		&saved, &rating, &unlocked, &requiredAge,
 	); err != nil {
 		return nil, fmt.Errorf("scan book: %w", err)
+	}
+
+	row.Locked = unlocked == 0
+	if requiredAge.Valid {
+		age := int(requiredAge.Int64)
+		row.RequiredAge = &age
 	}
 
 	row.ReadingState = model.ReadingState(readingState)
@@ -280,10 +295,18 @@ func bookSorts(userID int64) map[string][]string {
 }
 
 // ApplyBookSort reports an unknown name rather than silently reordering.
+//
+// Readable books come first whatever the sort, per Decision 7, and it has to
+// be an ORDER BY rather than a Go-side pass or pagination would produce short
+// pages — the same class of bug as post-filtering.
 func ApplyBookSort(q *Query, name string, userID int64) (*Query, bool) {
 	exprs, ok := bookSorts(userID)[name]
 	if !ok {
 		return q, false
+	}
+
+	if gate := q.Gate(); gate.Restricted {
+		q = q.OrderBy(UnlockedSQL(BooksAlias, gate) + " DESC")
 	}
 	return q.OrderBy(exprs...), true
 }

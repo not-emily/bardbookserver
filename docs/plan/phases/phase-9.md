@@ -21,7 +21,8 @@ Make age-restricted accounts safe: readable books first, restricted books locked
 
 ## Files to Create
 
-- `internal/db/migrations/0009_age_gating.sql` — per-user overrides
+- `internal/db/migrations/0013_overrides.sql` — per-user overrides
+  (`0009` was taken by Phase 7)
 - `internal/policy/book.go` — extend with the age ladder
 - `internal/policy/book_test.go` — the ladder, per user shape
 - `internal/api/leak_test.go` — every read path, one restricted user
@@ -58,14 +59,15 @@ The leak test is the real deliverable. One restricted user, one restricted book,
 
 ## Validation
 
-- [ ] A restricted user sees readable books sorted above locked ones
-- [ ] A locked book carries `locked: true` and the correct `required_age`
-- [ ] A book in a `hide_when_locked` source is absent entirely, with no reason code
-- [ ] A restricted user can Save a locked book but not Read it
-- [ ] Shifting a fixture birth date forward unlocks a book with no other change
-- [ ] A per-user deny override hides a book that age would otherwise permit
-- [ ] A per-user allow override exposes a book that age would otherwise deny
-- [ ] An unrated book under a source with no default is denied, not allowed
-- [ ] `EffectiveMinAge()` and the SQL precedence agree on every fixture
-- [ ] Leak test passes for list, search, facet values, facet counts, series, collections, sync manifest, detail-by-id, file-by-id, and cover-by-id
-- [ ] An unrestricted user is unaffected by all of the above
+- [x] A restricted user sees readable books sorted above locked ones
+- [x] A locked book carries `locked: true` and the correct `required_age`
+- [x] A book in a `hide_when_locked` source is absent entirely, with no reason code
+- [x] A restricted user can Save a locked book but not Read it
+- [x] Shifting a fixture birth date forward unlocks a book with no other change
+- [x] A per-user deny override hides a book that age would otherwise permit
+- [x] A per-user allow override exposes a book that age would otherwise deny
+- [x] An unrated book under a source with no default is denied, not allowed
+      *(visible and locked, not hidden — see the decision log)*
+- [x] `EffectiveMinAge()` and the SQL precedence agree on every fixture
+- [x] Leak test passes for list, search, facet values, facet counts, series, collections, sync manifest, detail-by-id, file-by-id, and cover-by-id
+- [x] An unrestricted user is unaffected by all of the above

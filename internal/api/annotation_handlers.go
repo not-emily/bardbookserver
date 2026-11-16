@@ -85,7 +85,7 @@ func (s *Server) handleSaveAnnotation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "edition_id is required")
 		return
 	}
-	if !s.editionInScope(w, r, req.EditionID) {
+	if !s.editionReadable(w, r, req.EditionID) {
 		return
 	}
 
