@@ -21,8 +21,8 @@ const (
 	TLSFiles = "files"
 )
 
-// Provider names are declared here because this is the config schema a typo
-// lands in, and a provider that silently never runs is the worst answer.
+// Declared here so validate can reject a typo rather than leave a provider
+// silently never running.
 const (
 	ProviderOpenLibrary = "openlibrary"
 	ProviderGoogleBooks = "googlebooks"
@@ -44,8 +44,8 @@ type Config struct {
 	trustedPrefixes []netip.Prefix
 }
 
-// Metadata configures the online providers. Every one is off until named here,
-// because a lookup sends a title the user owns to a third party.
+// Metadata configures the online providers, every one off until named here: a
+// lookup sends a title the user owns to a third party.
 type Metadata struct {
 	Providers      map[string]bool `yaml:"providers"`
 	GoogleBooksKey string          `yaml:"google_books_key"`

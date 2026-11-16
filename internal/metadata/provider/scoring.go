@@ -9,15 +9,12 @@ import (
 	"github.com/not-emily/bardbookserver/internal/metadata"
 )
 
-// MatchThreshold is where a candidate stops being a guess. An exact title with
-// no author to confirm it lands exactly here: the file said nothing more, so
-// there is nothing further to check.
+// MatchThreshold is met exactly by an exact title with no author to confirm
+// it, which is all a file naming no author can offer.
 const MatchThreshold = 0.6
 
-// Score rates a candidate against what the file itself said. An identifier is
-// conclusive; otherwise the title carries the match and the author confirms
-// it. Normalization is grouping's, so the rule that decides two editions are
-// one book is the rule that decides a provider found the right one.
+// Score uses grouping's normalizers, so the rule that decides two editions are
+// one book decides whether a provider found the right one.
 func Score(q Query, c Candidate) float64 {
 	if isbn := metadata.ISBN13(q.ISBN); isbn != "" && isbn == metadata.ISBN13(c.ISBN) {
 		return 1
@@ -37,8 +34,8 @@ func Score(q Query, c Candidate) float64 {
 	case authorsUnknown:
 		return title
 	default:
-		// Both sides named an author and none of them match. That is evidence
-		// against, so halving keeps even an exact title below the threshold.
+		// Halving keeps even an exact title below the threshold: a named author
+		// that does not match is evidence against.
 		return title / 2
 	}
 }
@@ -52,8 +49,7 @@ func titleScore(want, got string) float64 {
 		return 0.6
 	}
 
-	// An ebook and its audiobook are often subtitled differently, which is the
-	// same allowance the grouping matcher makes.
+	// An ebook and its audiobook are often subtitled differently.
 	if grouping.NormalizeTitle(grouping.StripSubtitle(want)) ==
 		grouping.NormalizeTitle(grouping.StripSubtitle(got)) {
 		return 0.5
@@ -88,10 +84,8 @@ func authorAgreement(want, got []string) agreement {
 	return authorsDiffer
 }
 
-// namesAgree accepts one name being contained in the other, because Bard's own
-// path convention yields an author folder that is often a surname alone where a
-// provider returns the full name. Requiring equality would refuse every match
-// in a library laid out the way Bard recommends.
+// namesAgree accepts containment rather than equality, or "Tolkien" from an
+// author folder would never match "J. R. R. Tolkien" from a provider.
 func namesAgree(a, b []string) bool {
 	if len(a) > len(b) {
 		a, b = b, a
@@ -117,10 +111,8 @@ func authorTokens(names []string) [][]string {
 	return out
 }
 
-// Rank scores every candidate and orders them best first. It is what Fix Match
-// shows a person, so a candidate below the threshold is kept rather than
-// dropped: the automatic match refused it, and the whole point of asking is
-// that a person can see it anyway.
+// Rank keeps candidates below the threshold, since Fix Match exists to show a
+// person what the automatic match refused.
 func Rank(q Query, candidates []Candidate) []Candidate {
 	ranked := make([]Candidate, len(candidates))
 	copy(ranked, candidates)
@@ -132,9 +124,8 @@ func Rank(q Query, candidates []Candidate) []Candidate {
 	return ranked
 }
 
-// Best is the unattended decision: the highest scoring candidate, or none when
-// the field is too weak to call. A wrong match is worse than no match, because
-// it takes a person to notice and undo it.
+// Best declines a weak field rather than guessing: a wrong match takes a
+// person to notice and undo, a missed one costs only enrichment.
 func Best(q Query, candidates []Candidate) (Candidate, bool) {
 	ranked := Rank(q, candidates)
 	if len(ranked) == 0 || ranked[0].Score < MatchThreshold {

@@ -8,8 +8,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-// Trimmed from a real Audnexus response. The narrators are the field nothing
-// else in Bard can fill.
+// Trimmed from a real Audnexus response.
 const audnexusFrankl = `{
   "asin": "B002V0QUOC",
   "title": "Man's Search for Meaning",
@@ -59,8 +58,6 @@ func audioQuery() Query {
 	}
 }
 
-// Narrators are the whole point: nothing else Bard reads fills them, because
-// no sample audiobook sets the composer tag.
 func TestAudnexusFillsNarratorsAndChapters(t *testing.T) {
 	srv := audnexusStub(t)
 	p := testAudnexus(srv.URL, nil)
@@ -98,7 +95,7 @@ func TestAudnexusFillsNarratorsAndChapters(t *testing.T) {
 	if md.PublishedOn != "2004-10-13" {
 		t.Errorf("published_on is %q", md.PublishedOn)
 	}
-	// "english", not "en", in the response.
+	// "english" in the response.
 	if md.Language != "en" {
 		t.Errorf("language is %q, want \"en\"", md.Language)
 	}
@@ -122,13 +119,11 @@ func TestAudnexusFillsNarratorsAndChapters(t *testing.T) {
 		t.Errorf("second chapter starts at %v, want 772.574s", md.Chapters[1].StartSeconds)
 	}
 
-	// Never the duration: the file that plays is the authority on its length.
 	if md.DurationSeconds != nil {
 		t.Errorf("duration is %v, want none from a provider", md.DurationSeconds)
 	}
 }
 
-// The plan's rule: local chpl data wins, so the request is not even made.
 func TestAudnexusIsNotAskedForChaptersTheFileAlreadyHas(t *testing.T) {
 	srv := audnexusStub(t)
 	p := testAudnexus(srv.URL, nil)
@@ -149,7 +144,6 @@ func TestAudnexusIsNotAskedForChaptersTheFileAlreadyHas(t *testing.T) {
 	}
 }
 
-// Landing confidently in the wrong chapter is worse than having no chapters.
 func TestAudnexusRefusesChaptersItMarksInaccurate(t *testing.T) {
 	srv := audnexusStub(t)
 	srv.handle("/books/B002V0QUOC/chapters", jsonBody(`{
@@ -175,8 +169,6 @@ func TestAudnexusRefusesChaptersItMarksInaccurate(t *testing.T) {
 	}
 }
 
-// Audnexus has no title search, so a file with no ASIN cannot be matched here
-// and is not worth a request.
 func TestAudnexusWithoutAnASINAsksNothing(t *testing.T) {
 	srv := audnexusStub(t)
 	p := testAudnexus(srv.URL, nil)
@@ -196,8 +188,7 @@ func TestAudnexusWithoutAnASINAsksNothing(t *testing.T) {
 	}
 }
 
-// Audnexus answers a region restriction with a 200 and an error object, which
-// is a decline rather than a fault.
+// A region restriction arrives as a 200 with an error object.
 func TestAudnexusTreatsARegionRefusalAsNoMatch(t *testing.T) {
 	srv := newStub(t, map[string]func(http.ResponseWriter, *http.Request){
 		"/books/B0036MYRQA": jsonBody(`{"error": {

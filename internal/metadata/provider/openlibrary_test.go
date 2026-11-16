@@ -10,8 +10,8 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-// The shapes below are trimmed from real Open Library responses: the search
-// pools every edition's ISBN, and the work carries the description.
+// Trimmed from real Open Library responses. The ISBN list is pooled across
+// every edition, which is why it is long.
 const olSearchHobbit = `{
   "numFound": 1,
   "docs": [{
@@ -91,7 +91,7 @@ func TestOpenLibraryFillsTitleAuthorDescriptionAndCover(t *testing.T) {
 	if !strings.HasPrefix(md.Description, "Bilbo Baggins") {
 		t.Errorf("description is %q", md.Description)
 	}
-	// Three letters in, two letters out, or the facet holds "eng" and "en".
+	// "eng" in the response.
 	if md.Language != "en" {
 		t.Errorf("language is %q, want \"en\"", md.Language)
 	}
@@ -112,8 +112,6 @@ func TestOpenLibraryFillsTitleAuthorDescriptionAndCover(t *testing.T) {
 	}
 }
 
-// The file wins on anything it can measure, so a provider is never asked for a
-// page count or artwork the parser already produced.
 func TestOpenLibraryLeavesWhatTheFileAlreadyMeasured(t *testing.T) {
 	srv := newStub(t, hobbitRoutes())
 	p := testOpenLibrary(srv.URL, nil)
@@ -141,8 +139,7 @@ func TestOpenLibraryLeavesWhatTheFileAlreadyMeasured(t *testing.T) {
 	}
 }
 
-// Open Library answers a missing cover with a placeholder rather than a 404,
-// and the cover cache would store it as if it were artwork.
+// A missing cover comes back as a placeholder, not a 404.
 func TestOpenLibraryRejectsAPlaceholderCover(t *testing.T) {
 	routes := hobbitRoutes()
 	routes["/b/id/14627570-L.jpg"] = imageBody(43)
@@ -182,8 +179,7 @@ func TestOpenLibraryReadsBothDescriptionShapes(t *testing.T) {
 	}
 }
 
-// A merged work keeps answering under its old key with nothing but a pointer,
-// which is exactly what a live search returns for The Hobbit.
+// A live search for The Hobbit returns a key that redirects.
 func TestOpenLibraryFollowsAMergedWork(t *testing.T) {
 	routes := hobbitRoutes()
 	routes["/works/OL262758W.json"] = jsonBody(
@@ -208,7 +204,6 @@ func TestOpenLibraryFollowsAMergedWork(t *testing.T) {
 	}
 }
 
-// A redirect cycle must cost one extra request, not the scan.
 func TestOpenLibraryRefusesASecondRedirect(t *testing.T) {
 	routes := hobbitRoutes()
 	routes["/works/OL262758W.json"] = jsonBody(
@@ -237,8 +232,6 @@ func TestOpenLibraryRefusesASecondRedirect(t *testing.T) {
 	}
 }
 
-// The search pools every edition's language, so one entry is the only case
-// that says anything about this book.
 func TestOpenLibraryIgnoresAPooledLanguageList(t *testing.T) {
 	routes := hobbitRoutes()
 	routes["/search.json"] = jsonBody(`{"docs": [{
@@ -261,7 +254,6 @@ func TestOpenLibraryIgnoresAPooledLanguageList(t *testing.T) {
 	}
 }
 
-// A work that will not load costs the description and nothing else.
 func TestOpenLibraryKeepsTheSearchResultWhenTheWorkFails(t *testing.T) {
 	routes := hobbitRoutes()
 	routes["/works/OL262758W.json"] = status(http.StatusInternalServerError)
@@ -284,8 +276,6 @@ func TestOpenLibraryKeepsTheSearchResultWhenTheWorkFails(t *testing.T) {
 	}
 }
 
-// The doc lists every edition's ISBN; the one the file named is the one worth
-// carrying, because that is what makes the match conclusive.
 func TestOpenLibraryCarriesTheISBNTheFileNamed(t *testing.T) {
 	srv := newStub(t, hobbitRoutes())
 	p := testOpenLibrary(srv.URL, nil)

@@ -30,8 +30,6 @@ func TestATitleMatchesAloneWhenNobodyNamedAnAuthor(t *testing.T) {
 	}
 }
 
-// The important half of scoring: a title can be exact and still be the wrong
-// book, and a wrong match takes a person to notice and undo.
 func TestADisagreeingAuthorCannotMatch(t *testing.T) {
 	q := Query{Title: "The Hobbit", Authors: []string{"J.R.R. Tolkien"}}
 	c := Candidate{Title: "The Hobbit", Authors: []string{"Some Other Person"}}
@@ -56,9 +54,7 @@ func TestAnAgreeingAuthorSurvivesADifferentSubtitle(t *testing.T) {
 	}
 }
 
-// Bard's own path convention yields an author folder that is often a surname
-// alone, so requiring the full name would refuse every match in a library laid
-// out the way the docs recommend.
+// The recommended layout yields an author folder that is often a surname.
 func TestASurnameAgreesWithTheFullName(t *testing.T) {
 	q := Query{Title: "The Hobbit", Authors: []string{"Tolkien"}}
 	c := Candidate{Title: "The Hobbit", Authors: []string{"J. R. R. Tolkien"}}
@@ -77,7 +73,6 @@ func TestAnUnrelatedTitleScoresNothing(t *testing.T) {
 	}
 }
 
-// Fix Match shows what the automatic match refused, so Rank must not drop it.
 func TestRankOrdersEveryCandidateIncludingTheRejects(t *testing.T) {
 	q := Query{Title: "The Hobbit", Authors: []string{"J.R.R. Tolkien"}}
 	candidates := []Candidate{

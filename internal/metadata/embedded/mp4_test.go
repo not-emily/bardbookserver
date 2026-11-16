@@ -154,8 +154,8 @@ func TestParseM4BWithoutChaptersOrTags(t *testing.T) {
 	}
 }
 
-// ilstBox wraps tag atoms the way a real file does: udta, then a meta box with
-// its own version word, then ilst.
+// ilstBox nests the way a real file does, including the meta box's version
+// word.
 func ilstBox(children ...[]byte) []byte {
 	var items []byte
 	for _, child := range children {
@@ -166,9 +166,7 @@ func ilstBox(children ...[]byte) []byte {
 	return box("udta", box("meta", meta))
 }
 
-// freeFormBox is the layout Audible writes the ASIN in: a mean naming the
-// vendor, a name naming the field, and a data child carrying the value behind
-// its encoding and locale words.
+// freeFormBox is the layout Audible writes the ASIN in.
 func freeFormBox(name, value string) []byte {
 	mean := box("mean", append([]byte{0, 0, 0, 0}, "com.apple.iTunes"...))
 	nameBox := box("name", append([]byte{0, 0, 0, 0}, name...))
@@ -189,8 +187,6 @@ func concat(parts ...[]byte) []byte {
 	return out
 }
 
-// Audnexus is keyed on the ASIN and has no title search, so a file that does
-// not yield one can never be enriched by it.
 func TestParseM4BReadsTheAudibleASIN(t *testing.T) {
 	path := writeM4B(t,
 		box("mvhd", mvhdPayload(1000, 60000)),
@@ -221,8 +217,6 @@ func TestParseM4BIgnoresAnotherVendorsFreeFormField(t *testing.T) {
 	}
 }
 
-// A store stamps its name into the comment, and that must not stand as the
-// book's description when the file carries a real one.
 func TestParseM4BPrefersTheLongDescriptionOverTheComment(t *testing.T) {
 	blurb := "Darrow is a Red, a member of the lowest caste."
 	path := writeM4B(t,
@@ -242,7 +236,6 @@ func TestParseM4BPrefersTheLongDescriptionOverTheComment(t *testing.T) {
 	}
 }
 
-// With no long description the comment is all there is, so it still stands.
 func TestParseM4BFallsBackToTheComment(t *testing.T) {
 	path := writeM4B(t,
 		box("mvhd", mvhdPayload(1000, 60000)),

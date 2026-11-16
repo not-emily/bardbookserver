@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// Trimmed from a real volumes response. The categories are the BISAC-shaped
-// headings the taxonomy will map.
+// Trimmed from a real volumes response.
 const googleVolumeHobbit = `{
   "totalItems": 1,
   "items": [{
@@ -37,8 +36,7 @@ const googleVolumeHobbit = `{
   }]
 }`
 
-// googleStub serves the volume with its image links pointing at itself, which
-// is only knowable once the server is listening.
+// The image links have to name the stub, which is known only once it listens.
 func googleStub(t *testing.T) *stub {
 	srv := newStub(t, nil)
 	srv.handle("/volumes",
@@ -87,8 +85,7 @@ func TestGoogleBooksFillsTheDescriptionAndSplitsCategories(t *testing.T) {
 		t.Errorf("page count is %v", md.PageCount)
 	}
 
-	// "Fiction / Fantasy / General" must offer the taxonomy three chances to
-	// map rather than one string to miss on, and "Fantasy" must not repeat.
+	// "Fantasy" appears in both headings and must not repeat.
 	want := []string{"Fiction", "Fantasy", "General", "Juvenile Fiction", "Fantasy & Magic"}
 	if len(md.Subjects) != len(want) {
 		t.Fatalf("subjects are %v, want %v", md.Subjects, want)
@@ -133,8 +130,6 @@ func TestGoogleBooksScopesItsQueryToTheRightFields(t *testing.T) {
 	}
 }
 
-// A quote in a title would close the field term early and change what is being
-// asked.
 func TestGoogleBooksNeutralisesAQuotedTitle(t *testing.T) {
 	var query string
 	srv := newStub(t, map[string]func(http.ResponseWriter, *http.Request){
@@ -180,10 +175,6 @@ func TestGoogleBooksSendsTheKeyWhenConfigured(t *testing.T) {
 	}
 }
 
-// Google states its limit as a thousand queries a day, and keyless that quota
-// is shared with every other anonymous caller — so a backfill can meet it
-// halfway through. Retrying every remaining book three times is the behaviour
-// this prevents.
 func TestADailyQuotaRefusalStopsAskingForTheDay(t *testing.T) {
 	const refusal = `{"error": {"code": 429, "message":
 		"Quota exceeded for quota metric 'Queries' and limit 'Queries per day'",
@@ -200,7 +191,7 @@ func TestADailyQuotaRefusalStopsAskingForTheDay(t *testing.T) {
 	if _, err := p.Search(context.Background(), Query{Title: "The Hobbit"}); err == nil {
 		t.Fatal("a quota refusal came back as success")
 	}
-	// Refused once, not retried: the service said tomorrow, not later.
+	// Refused once, not retried.
 	if n := srv.count("/volumes"); n != 1 {
 		t.Errorf("the provider was asked %d times, want 1", n)
 	}
@@ -213,8 +204,6 @@ func TestADailyQuotaRefusalStopsAskingForTheDay(t *testing.T) {
 	}
 }
 
-// A per-minute rate limit is worth waiting out, and only the body tells the
-// two apart.
 func TestAPlainRateLimitIsStillRetried(t *testing.T) {
 	srv := newStub(t, map[string]func(http.ResponseWriter, *http.Request){
 		"/volumes": func(w http.ResponseWriter, _ *http.Request) {

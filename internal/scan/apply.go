@@ -17,16 +17,12 @@ type editionRef struct {
 	book    int64
 }
 
-// applyMetadata writes resolved metadata onto the book and its edition,
-// leaving any field a hand correction has locked alone. It returns the locks it
-// honoured, which the sidecar records alongside the values.
+// applyMetadata writes resolved metadata onto the book and its edition. The
+// caller supplies the locks to leave alone, so a scan can respect a correction
+// where Fix Match overwrites one.
 func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
-	md metadata.Metadata, durations []*float64, res *Result) (model.FieldSet, error) {
-
-	bookLocks, editionLocks, err := loadLocks(ctx, tx, ref)
-	if err != nil {
-		return 0, err
-	}
+	md metadata.Metadata, durations []*float64,
+	bookLocks, editionLocks model.FieldSet, res *Result) (model.FieldSet, error) {
 
 	book := &updates{}
 	if md.Title != "" && !bookLocks.Has(model.FieldTitle) {

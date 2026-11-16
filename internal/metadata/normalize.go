@@ -2,10 +2,8 @@ package metadata
 
 import "strings"
 
-// NormalizeLanguage keeps the primary subtag so "en-US" and "en" land in one
-// facet, and folds the three-letter codes onto two-letter ones: a provider
-// answers "eng" where an EPUB says "en", and untouched they are two values for
-// one language.
+// NormalizeLanguage keeps the primary subtag and folds three-letter codes onto
+// two, so an EPUB's "en" and a provider's "eng" are one facet value.
 func NormalizeLanguage(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	if i := strings.IndexAny(v, "-_"); i > 0 {
@@ -14,7 +12,7 @@ func NormalizeLanguage(v string) string {
 	if len(v) < 2 || len(v) > 3 {
 		return ""
 	}
-	// The codes meaning "no answer" would otherwise become a facet entry.
+	// The codes meaning "no answer" would become a facet entry.
 	switch v {
 	case "xxx", "zxx", "und", "mul":
 		return ""
@@ -30,9 +28,8 @@ func NormalizeLanguage(v string) string {
 	return v
 }
 
-// threeLetterLanguages covers what a library of this kind holds, including both
-// the bibliographic and terminological codes where they differ. An unmapped
-// code passes through rather than being dropped.
+// threeLetterLanguages carries both the bibliographic and terminological codes
+// where they differ. An unmapped code passes through rather than being dropped.
 var threeLetterLanguages = map[string]string{
 	"afr": "af", "ara": "ar", "ben": "bn", "bul": "bg", "cat": "ca",
 	"ces": "cs", "cze": "cs", "cym": "cy", "dan": "da", "deu": "de",
@@ -48,8 +45,8 @@ var threeLetterLanguages = map[string]string{
 	"urd": "ur", "vie": "vi", "wel": "cy", "zho": "zh", "chi": "zh",
 }
 
-// NormalizeDate keeps a bare year as a year and reduces a timestamp to its
-// date, so published_on stays comparable across parsers and providers.
+// NormalizeDate keeps a bare year and reduces a timestamp to its date, so
+// published_on stays comparable across parsers and providers.
 func NormalizeDate(v string) string {
 	v = strings.TrimSpace(v)
 	if i := strings.IndexAny(v, "T "); i > 0 {
@@ -66,9 +63,8 @@ func NormalizeDate(v string) string {
 	return v
 }
 
-// NormalizeISBN strips the punctuation editions are published with and rejects
-// anything that is not a plausible ISBN, so a Gutenberg URL identifier does not
-// end up in the ISBN column.
+// NormalizeISBN rejects anything implausible, so a Gutenberg URL identifier
+// does not end up in the ISBN column.
 func NormalizeISBN(v string) string {
 	var b strings.Builder
 	for _, r := range strings.ToUpper(v) {
@@ -94,11 +90,8 @@ func NormalizeISBN(v string) string {
 	return s
 }
 
-// NormalizeASIN rejects anything that is not shaped like one, so a tool that
-// wrote a URL or a UUID into the field does not send Audnexus looking for it.
-// Amazon's identifiers are ten characters, and an audiobook's always begins
-// with a letter — a print title can be listed under its ISBN-10 instead, which
-// is deliberately refused here, since the only consumer serves audiobooks.
+// NormalizeASIN requires the leading letter an audiobook ASIN always has,
+// which also refuses the ISBN-10 a print title can be listed under.
 func NormalizeASIN(v string) string {
 	s := strings.ToUpper(strings.TrimSpace(v))
 	if len(s) != 10 {
@@ -117,9 +110,8 @@ func NormalizeASIN(v string) string {
 	return s
 }
 
-// ISBN13 is the comparison form: a file commonly carries the 10-digit ISBN
-// where a provider returns the 13-digit one, and an identifier match is too
-// valuable to lose over which form each happened to use.
+// ISBN13 is the comparison form, since a file often carries the 10-digit ISBN
+// where a provider returns the 13-digit one.
 func ISBN13(v string) string {
 	s := NormalizeISBN(v)
 	switch len(s) {

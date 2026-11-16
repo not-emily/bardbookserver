@@ -7,9 +7,8 @@ import (
 	"log/slog"
 )
 
-// Cache keeps provider responses keyed on the request that produced them. A
-// nil Cache is a working cache that remembers nothing, which is what tests and
-// a database-less lookup get.
+// Cache stores provider responses forever, keyed on the request. A nil Cache
+// remembers nothing rather than failing.
 type Cache struct {
 	db     *sql.DB
 	logger *slog.Logger
@@ -22,8 +21,8 @@ func NewCache(database *sql.DB, logger *slog.Logger) *Cache {
 	return &Cache{db: database, logger: logger}
 }
 
-// Get treats a cache failure as a miss. Being unable to read what we asked
-// last time is a reason to ask again, never a reason to fail a lookup.
+// Get treats a failure as a miss: being unable to read what we asked last time
+// is a reason to ask again, not to fail the lookup.
 func (c *Cache) Get(ctx context.Context, provider, url string) (int, []byte, bool) {
 	if c == nil {
 		return 0, nil, false
@@ -51,8 +50,7 @@ func (c *Cache) Put(ctx context.Context, provider, url string, status int, body 
 		return
 	}
 	if body == nil {
-		// A 404 has no body, and the column is NOT NULL.
-		body = []byte{}
+		body = []byte{} // a 404 has none, and the column is NOT NULL
 	}
 
 	if _, err := c.db.ExecContext(ctx, `

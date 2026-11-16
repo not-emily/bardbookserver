@@ -3,6 +3,68 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-16: Fix Match names an edition, and applying one pins and locks
+
+**Decision:** The endpoint is `/api/v1/books/{id}/match` as planned, but it
+resolves to exactly one edition — implied when a book has one, named with
+`edition_id` when it has several, and a 400 otherwise. Applying a match records
+a pin in `provider_matches` *and* sets the lock bits for the fields the chosen
+record filled, then writes both to the sidecar.
+
+**Rationale:** A provider record describes one manifestation. One choice cannot
+correct both the EPUB and the audiobook of a title: the ISBN belongs to one and
+the ASIN to the other, and an Audnexus record is meaningless against an EPUB.
+Refusing an ambiguous book is better than silently picking an edition or
+writing the same ISBN onto both.
+
+Pinning and locking look redundant and are not. The pin keeps a rescan
+consistent *while providers are enabled*; the locks keep the correction when a
+provider is later disabled, and the sidecar keeps it when the database is
+deleted and rebuilt from disk, which the plan's success metrics require. Only
+the fields the record actually filled are locked, so an empty description does
+not freeze the field against a better provider later.
+
+**Alternatives Considered:** Pinning without locking, which loses the
+correction the moment a provider is turned off. Locking every field, which
+freezes a book against every future parser improvement. Applying to every
+edition of the book, which writes one edition's identifiers onto another.
+
+**Impact:** `DELETE /api/v1/books/{id}/match` unpins without discarding the
+values, because asking for the match to be reconsidered is not asking for the
+metadata to be thrown away; unlocking a field is a separate act that v1 phase
+11 surfaces. An automatic match is deliberately *not* pinned, so a better score
+stays free to win.
+
+---
+
+## 2026-11-16: A chosen candidate is re-found, not remembered
+
+**Decision:** Applying a match re-runs the search the candidate came from and
+finds it again by id, rather than holding the candidate between the search and
+the choice. The query the match was found by is stored on the pin as JSON.
+
+**Rationale:** The response cache makes the re-run free, so there is nothing to
+gain from server-side state between two requests — no session, no expiry, no
+candidate store to keep consistent. `Candidate` carries an unexported payload
+that only its own provider can read, so it was never serialisable anyway.
+
+Storing the query is what makes a pin durable. A rescan searches on whatever
+the file says *today*; if a person corrected a badly titled file, searching on
+that title again would not return the record they chose, and the pinned id
+would be unfindable. The stored query reproduces the search that found it.
+
+**Alternatives Considered:** Fetching the provider record by id alone, which
+Open Library cannot satisfy — its work endpoint carries neither the authors'
+names nor the cover id, both of which the search already returned. Caching
+candidates server-side, which is state with a lifetime to get wrong.
+
+**Impact:** A pin whose record a provider has withdrawn produces a warning on
+every scan rather than silently reverting, which is the right way round. The
+`Want` flags are excluded from the stored query, since they describe the file
+as it was at the time.
+
+---
+
 ## 2026-11-16: A shared quota is not counted, it is obeyed
 
 **Decision:** No request budget is tracked. When a provider answers 429 or 403

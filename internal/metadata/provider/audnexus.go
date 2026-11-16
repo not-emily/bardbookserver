@@ -27,9 +27,8 @@ func (a *audnexus) Name() string { return config.ProviderAudnexus }
 
 func (a *audnexus) Serves(kind model.Kind) bool { return kind == model.KindAudiobook }
 
-// Search is a lookup rather than a search: Audnexus exposes `/books/{asin}`
-// and nothing else, so a file with no ASIN cannot be matched here at all. That
-// is why the MP4 parser reads the Audible free-form atom.
+// Search is a lookup: Audnexus exposes /books/{asin} and nothing else, so a
+// file with no ASIN cannot be matched here at all.
 func (a *audnexus) Search(ctx context.Context, q Query) ([]Candidate, error) {
 	asin := metadata.NormalizeASIN(q.ASIN)
 	if asin == "" {
@@ -43,8 +42,7 @@ func (a *audnexus) Search(ctx context.Context, q Query) ([]Candidate, error) {
 		}
 		return nil, err
 	}
-	// Audnexus answers an unavailable title with a 200 and an error object,
-	// which is the region restriction rather than a fault.
+	// A region restriction arrives as a 200 with an error object, not a fault.
 	if book.Error.Code != "" {
 		a.client.logger.Debug("audnexus declined",
 			"asin", asin, "code", book.Error.Code, "message", book.Error.Message)
@@ -62,7 +60,7 @@ func (a *audnexus) Search(ctx context.Context, q Query) ([]Candidate, error) {
 		Authors:  book.names(book.Authors),
 		Year:     yearOf(book.ReleaseDate),
 		ISBN:     metadata.NormalizeISBN(book.ISBN),
-		// Carried so the ASIN match scores as the conclusive thing it is.
+		// Carried so Score reads the ASIN match as conclusive.
 		ASIN:     book.ASIN,
 		CoverURL: book.Image,
 		payload:  book,
@@ -97,8 +95,8 @@ func (a *audnexus) Fetch(ctx context.Context, q Query, c Candidate) (metadata.Me
 		md.Abridged = &abridged
 	}
 
-	// Never the duration: the file that actually plays is the authority on how
-	// long it is, and Audnexus reports Audible's edition to the minute.
+	// Never the duration: Audnexus reports Audible's edition to the minute,
+	// and the file that plays is the authority on its own length.
 	if q.WantChapters {
 		if chapters, err := a.chapters(ctx, book.ASIN); err != nil {
 			a.client.logger.Debug("audnexus chapters unavailable",
@@ -119,10 +117,8 @@ func (a *audnexus) Fetch(ctx context.Context, q Query, c Candidate) (metadata.Me
 	return md, nil
 }
 
-// chapters is the gap Audnexus exists to fill: an M4B converted from AAX
-// frequently carries no chapter marks at all. Inaccurate data is refused
-// rather than used, because landing confidently in the wrong chapter is worse
-// than having no chapter list.
+// chapters refuses data Audnexus marks inaccurate: landing confidently in the
+// wrong chapter is worse than having no chapter list.
 func (a *audnexus) chapters(ctx context.Context, asin string) ([]metadata.Chapter, error) {
 	var resp audnexusChapters
 	if err := a.client.getJSON(ctx, a.base+"/books/"+asin+"/chapters", &resp); err != nil {
@@ -158,8 +154,8 @@ func (a *audnexus) cover(ctx context.Context, target string) (*metadata.Cover, e
 	return &metadata.Cover{Data: body, MIME: "image/jpeg"}, nil
 }
 
-// audnexusLanguage maps the English name Audnexus reports onto the code every
-// other source uses, so one book does not hold both "english" and "en".
+// audnexusLanguage folds the English name onto the code every other source
+// uses, so one book does not hold both "english" and "en".
 func audnexusLanguage(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "english":
@@ -193,8 +189,7 @@ func audnexusLanguage(name string) string {
 	case "":
 		return ""
 	}
-	// Anything else is passed through the usual normalizer, which rejects a
-	// word it cannot read rather than inventing a code.
+	// Rejects a word it cannot read rather than inventing a code.
 	return metadata.NormalizeLanguage(name)
 }
 
@@ -242,9 +237,8 @@ type audnexusGenre struct {
 	Type string `json:"type"`
 }
 
-// genreNames keeps both the genres and the tags: the taxonomy maps what it
-// recognises and `raw_subjects` holds the rest, so discarding the looser ones
-// here would lose data the mapping table wants.
+// genreNames keeps the tags as well as the genres; raw_subjects holds whatever
+// the taxonomy cannot map.
 func (b audnexusBook) genreNames() []string {
 	out := make([]string, 0, len(b.Genres))
 	for _, g := range b.Genres {

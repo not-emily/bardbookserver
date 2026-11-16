@@ -106,6 +106,42 @@ match takes a person to notice and undo.
 An author folder named with a surname alone agrees with a provider's full name,
 since that is how the recommended layout is usually written.
 
+## Fix Match
+
+When a provider picks the wrong book, or refuses to pick one, an admin can
+search and choose:
+
+```
+GET    /api/v1/books/{id}/match                  ranked candidates
+GET    /api/v1/books/{id}/match?q=…&author=…     search for something else
+POST   /api/v1/books/{id}/match                  apply {provider, id}
+DELETE /api/v1/books/{id}/match                  unpin
+```
+
+The candidate list keeps the records the automatic matcher *refused* — each
+carries its score and a `would_match_automatically` flag — because seeing the
+near miss is usually the point. Passing `q` searches for something else
+entirely and drops the book's identifiers, which would otherwise hold the
+search to the book being corrected.
+
+A book with several editions needs one named with `edition_id`: a provider
+record describes a single manifestation, so one choice cannot correct both the
+ebook and the audiobook of a title.
+
+Applying a match does three things, which together are what make a correction
+stick:
+
+1. **Pins** the chosen record, so a rescan re-fetches it instead of searching
+   again and possibly deciding differently.
+2. **Locks** the fields it filled, so the correction survives the provider
+   being disabled.
+3. **Writes the sidecar**, so it survives the database being deleted and
+   rebuilt from disk.
+
+Unpinning asks for the match to be reconsidered; it does not discard the
+values. An *automatic* match is never pinned, so a better score stays free to
+win on a later scan.
+
 ## Checking against the live services
 
 The recorded responses in the test suite are only as good as the day they were

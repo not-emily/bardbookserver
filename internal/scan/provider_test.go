@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/media"
@@ -15,9 +17,10 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-// stubProvider answers whatever the test wants and records what it was asked,
-// so the scan's side of the contract is tested without a transport.
+// stubProvider records what it was asked, so the scan's side of the contract
+// is tested without a transport.
 type stubProvider struct {
+	id      string
 	md      metadata.Metadata
 	err     error
 	queries []provider.Query
@@ -32,9 +35,13 @@ func (s *stubProvider) Search(_ context.Context, q provider.Query) ([]provider.C
 	if s.err != nil {
 		return nil, s.err
 	}
+	id := s.id
+	if id == "" {
+		id = "stub-1"
+	}
 	return []provider.Candidate{{
 		Provider: s.Name(),
-		ID:       "stub-1",
+		ID:       id,
 		Title:    s.md.Title,
 		Authors:  s.md.Authors,
 	}}, nil
@@ -87,8 +94,7 @@ func TestAProviderFillsWhatTheFileCouldNotSay(t *testing.T) {
 		t.Errorf("publisher is %q", publisher)
 	}
 
-	// A fixture file carries no cover and no page count, so the provider is
-	// asked for both.
+	// The fixture carries no cover and no page count.
 	if len(p.queries) != 1 {
 		t.Fatalf("the provider was asked %d times, want 1", len(p.queries))
 	}
@@ -97,8 +103,6 @@ func TestAProviderFillsWhatTheFileCouldNotSay(t *testing.T) {
 	}
 }
 
-// The precedence chain puts the provider above the file for bibliographic
-// fields, and the path convention below both.
 func TestAProviderOutranksThePathConvention(t *testing.T) {
 	root := tree(t, "Tolkien/The Hobbit.epub")
 	p := &stubProvider{md: metadata.Metadata{
@@ -128,9 +132,8 @@ func TestAProviderOutranksThePathConvention(t *testing.T) {
 	}
 }
 
-// The narrator facet has existed since Phase 6 with no values in it, because
-// nothing Bard reads from a file fills narrators unless the file sets the
-// composer tag. This is the unblock.
+// Nothing read from a file fills narrators unless it sets the composer tag,
+// which is why the v1 phase 6 facet had no values until now.
 func TestAProviderFillsTheNarratorFacet(t *testing.T) {
 	root := tree(t, "Brown/Red Rising.m4b")
 	start := 0.0
@@ -153,8 +156,7 @@ func TestAProviderFillsTheNarratorFacet(t *testing.T) {
 		t.Errorf("narrators are %v", narrators)
 	}
 
-	// A narrator belongs to the edition, not the book, since two narrations of
-	// one title are two editions.
+	// Two narrations of one title are two editions.
 	var editionID *int64
 	if err := d.QueryRow(
 		`SELECT edition_id FROM contributions WHERE role = 'narrator'`).Scan(&editionID); err != nil {
@@ -168,8 +170,6 @@ func TestAProviderFillsTheNarratorFacet(t *testing.T) {
 		t.Errorf("got %d chapters, want 1", n)
 	}
 
-	// The provider was asked for chapters because the fixture has none of its
-	// own, which is the condition the plan puts on using them.
 	if len(p.queries) != 1 || !p.queries[0].WantChapters {
 		t.Errorf("query is %+v, want chapters asked for", p.queries)
 	}
@@ -178,8 +178,6 @@ func TestAProviderFillsTheNarratorFacet(t *testing.T) {
 	}
 }
 
-// Without this a refresh silently discards a correction, which trains the user
-// to stop making them.
 func TestALockedFieldOutranksTheProvider(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "Tolkien")
@@ -220,7 +218,6 @@ func TestALockedFieldOutranksTheProvider(t *testing.T) {
 	}
 }
 
-// A provider that fails leaves the scan successful on what the file said.
 func TestAFailingProviderWarnsAndLeavesTheScanSuccessful(t *testing.T) {
 	root := tree(t, "Tolkien/The Hobbit.epub")
 	p := &stubProvider{err: errors.New("503 Service Unavailable")}
@@ -243,8 +240,6 @@ func TestAFailingProviderWarnsAndLeavesTheScanSuccessful(t *testing.T) {
 	}
 }
 
-// Nothing enabled means nothing asked, which is what makes the privacy
-// consequence of a lookup a choice rather than a default.
 func TestADisabledRegistryAsksNobody(t *testing.T) {
 	root := tree(t, "Tolkien/The Hobbit.epub")
 	s, d, sourceID := testScanner(t, root)
@@ -263,7 +258,127 @@ func TestADisabledRegistryAsksNobody(t *testing.T) {
 	}
 }
 
-// A rescan over an unchanged tree parses nothing, so it asks nothing either.
+// A pin is what keeps a correction through a rescan: the chosen record is
+// fetched again rather than the search being scored afresh.
+func TestAPinnedMatchSurvivesARescan(t *testing.T) {
+	root := tree(t, "Tolkien/The Hobbit.epub")
+	p := &stubProvider{id: "chosen-1", md: metadata.Metadata{
+		Title:       "The Hobbit",
+		Authors:     []string{"J. R. R. Tolkien"},
+		Description: "What the chosen record says.",
+	}}
+	s, d, sourceID := scannerWith(t, root, p)
+	mustScan(t, s, sourceID)
+
+	var editionID int64
+	if err := d.QueryRow(`SELECT id FROM editions`).Scan(&editionID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stands in for a Fix Match applied through the API.
+	tx, err := d.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordMatch(context.Background(), tx, editionID, Match{
+		Provider:   p.Name(),
+		ProviderID: "chosen-1",
+		Manual:     true,
+		Score:      1,
+		Query:      provider.Query{Title: "A Title The File Does Not Have"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Touched so the rescan re-resolves rather than skipping the candidate.
+	stamp := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "Tolkien", "The Hobbit.epub"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s, sourceID)
+
+	last := p.queries[len(p.queries)-1]
+	if last.Pinned[p.Name()] != "chosen-1" {
+		t.Errorf("the rescan asked with pins %v, want the chosen record", last.Pinned)
+	}
+	if last.Title != "A Title The File Does Not Have" {
+		t.Errorf("the rescan asked for %q, want the stored query", last.Title)
+	}
+
+	var description string
+	if err := d.QueryRow(
+		`SELECT COALESCE(description, '') FROM books`).Scan(&description); err != nil {
+		t.Fatal(err)
+	}
+	if description != "What the chosen record says." {
+		t.Errorf("description is %q, want the pinned record's", description)
+	}
+}
+
+// Only the sidecar carries a correction through the index being deleted and
+// rebuilt from disk.
+func TestApplyMatchWritesTheSidecar(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Tolkien")
+	writeFixtureEPUB(t, filepath.Join(dir, "fotr.epub"))
+
+	s, d, sourceID := sidecarScanner(t, root, true)
+	mustScan(t, s, sourceID)
+
+	var editionID, bookID int64
+	if err := d.QueryRow(`SELECT id, book_id FROM editions`).Scan(&editionID, &bookID); err != nil {
+		t.Fatal(err)
+	}
+
+	chosen := metadata.Metadata{
+		Title:       "The Fellowship of the Ring",
+		Authors:     []string{"J. R. R. Tolkien"},
+		Description: "Chosen by hand.",
+	}
+	target := MatchTarget{EditionID: editionID, BookID: bookID, Kind: model.KindEbook}
+	if err := s.ApplyMatch(context.Background(), target, chosen, Match{
+		Provider: "stub", ProviderID: "chosen-1", Manual: true, Score: 1,
+	}); err != nil {
+		t.Fatalf("apply match: %v", err)
+	}
+
+	entry := readSidecar(t, dir).Editions["fotr.epub"]
+	if entry.Description != "Chosen by hand." {
+		t.Errorf("sidecar description is %q", entry.Description)
+	}
+	locked := model.ParseFields(entry.Locked)
+	if !locked.Has(model.FieldTitle) || !locked.Has(model.FieldDescription) {
+		t.Errorf("sidecar locks are %v", entry.Locked)
+	}
+
+	// A fresh database, as if the index had been deleted.
+	s2, d2, sourceID2 := sidecarScanner(t, root, true)
+	mustScan(t, s2, sourceID2)
+
+	titles := queryStrings(t, d2, `SELECT title FROM books`)
+	if len(titles) != 1 || titles[0] != "The Fellowship of the Ring" {
+		t.Errorf("titles %v, want the match to survive a rebuild", titles)
+	}
+}
+
+// An automatic match is not pinned, so a better score stays free to win.
+func TestAnAutomaticMatchIsNotPinned(t *testing.T) {
+	root := tree(t, "Tolkien/The Hobbit.epub")
+	p := &stubProvider{md: metadata.Metadata{
+		Title:   "The Hobbit",
+		Authors: []string{"J. R. R. Tolkien"},
+	}}
+	s, d, sourceID := scannerWith(t, root, p)
+	mustScan(t, s, sourceID)
+
+	if n := countRows(t, d, "provider_matches"); n != 0 {
+		t.Errorf("%d matches were pinned by a scan", n)
+	}
+}
+
 func TestARescanDoesNotAskAgain(t *testing.T) {
 	root := tree(t, "Tolkien/The Hobbit.epub")
 	p := &stubProvider{md: metadata.Metadata{

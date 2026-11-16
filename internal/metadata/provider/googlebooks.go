@@ -15,8 +15,6 @@ import (
 
 const googleBooksBase = "https://www.googleapis.com/books/v1"
 
-// googleMaxSubjects caps the BISAC-shaped categories, which are few but can
-// repeat across volumes.
 const googleMaxSubjects = 20
 
 type googleBooks struct {
@@ -34,7 +32,7 @@ func newGoogleBooks(c *client, key string) *googleBooks {
 func (g *googleBooks) Name() string { return config.ProviderGoogleBooks }
 
 // Google Books catalogues print editions, so it answers for an audiobook's
-// title, author and description but knows nothing about narration.
+// title and description but knows nothing about narration.
 func (g *googleBooks) Serves(model.Kind) bool { return true }
 
 func (g *googleBooks) Search(ctx context.Context, q Query) ([]Candidate, error) {
@@ -76,8 +74,8 @@ func (g *googleBooks) Search(ctx context.Context, q Query) ([]Candidate, error) 
 	return out, nil
 }
 
-// googleQuery uses the field-scoped syntax, because a bare title search ranks
-// anything mentioning the words and quoting alone does not constrain the field.
+// googleQuery scopes the fields, since a bare search ranks anything mentioning
+// the words.
 func googleQuery(q Query) string {
 	if isbn := metadata.NormalizeISBN(q.ISBN); isbn != "" {
 		return "isbn:" + isbn
@@ -90,14 +88,12 @@ func googleQuery(q Query) string {
 	return strings.Join(terms, " ")
 }
 
-// googleEscape drops the quote characters that would close the field term
-// early. Nothing else in the syntax is meaningful inside quotes.
+// googleEscape drops the characters that would close a field term early.
 func googleEscape(v string) string {
 	return strings.NewReplacer(`"`, " ", `\`, " ").Replace(v)
 }
 
-// Fetch needs no second request: the volume carries everything but the cover
-// bytes.
+// Fetch needs no second request; the volume carries everything but the cover.
 func (g *googleBooks) Fetch(ctx context.Context, q Query, c Candidate) (metadata.Metadata, error) {
 	item, ok := c.payload.(googleVolume)
 	if !ok {
@@ -143,9 +139,8 @@ func (g *googleBooks) cover(ctx context.Context, target string) (*metadata.Cover
 	return &metadata.Cover{Data: body, MIME: "image/jpeg"}, nil
 }
 
-// googleSubjects splits the BISAC-shaped headings into their parts, so
-// "Fiction / Fantasy / Epic" offers the taxonomy three chances to map rather
-// than one string to miss on.
+// googleSubjects splits a BISAC heading, so "Fiction / Fantasy / Epic" gives
+// the taxonomy three chances to map rather than one string to miss on.
 func googleSubjects(categories []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(categories))
@@ -207,7 +202,6 @@ type googleIdentifier struct {
 	Identifier string `json:"identifier"`
 }
 
-// isbn prefers the 13-digit form, which is what a modern edition carries.
 func (i googleVolumeInfo) isbn() string {
 	var ten string
 	for _, id := range i.IndustryIdentifiers {
@@ -234,8 +228,7 @@ type googleImageLinks struct {
 	SmallThumbnail string `json:"smallThumbnail"`
 }
 
-// best takes the largest offered, since the thumbnail is around 128px and the
-// cover cache generates its own variants from whatever it is given.
+// best takes the largest offered; the thumbnail is around 128px.
 func (l googleImageLinks) best() string {
 	for _, link := range []string{
 		l.ExtraLarge, l.Large, l.Medium, l.Small, l.Thumbnail, l.SmallThumbnail,

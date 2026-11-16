@@ -12,8 +12,6 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-// Metadata lookup sends a title the user owns to a third party, so nothing
-// being enabled is the default rather than a setting.
 func TestNoProviderIsEnabledByDefault(t *testing.T) {
 	r := New(config.Metadata{}, nil, discard())
 
@@ -41,9 +39,8 @@ func TestNamingAProviderEnablesOnlyThatOne(t *testing.T) {
 	}
 }
 
-// Registration order is precedence order, so this pins it: Audnexus is the
-// only one that knows narration, and it answers nothing but an audiobook it
-// was given an ASIN for.
+// Registration order is precedence order, so changing it changes which
+// provider owns a field.
 func TestAudnexusLeadsTheRegistry(t *testing.T) {
 	r := New(config.Metadata{
 		Providers: map[string]bool{
@@ -70,8 +67,6 @@ func TestAudnexusLeadsTheRegistry(t *testing.T) {
 	}
 }
 
-// A dead or throttled provider must leave the scan successful on embedded
-// metadata alone. Goodreads killed its API with no notice in 2020.
 func TestAProviderFailureIsAWarningNotAFailure(t *testing.T) {
 	srv := newStub(t, map[string]func(http.ResponseWriter, *http.Request){
 		"/search.json": status(http.StatusInternalServerError),
@@ -85,7 +80,6 @@ func TestAProviderFailureIsAWarningNotAFailure(t *testing.T) {
 	if len(warnings) != 1 {
 		t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
 	}
-	// Retried rather than given up on at the first fault.
 	if n := srv.count("/search.json"); n != attempts {
 		t.Errorf("the provider was asked %d times, want %d", n, attempts)
 	}
@@ -107,8 +101,6 @@ func TestATimeoutLeavesTheLookupEmpty(t *testing.T) {
 	}
 }
 
-// Lookups are once per new book and cached forever: the answer to "what is
-// ISBN 9780618574986" does not change, and a 5000-book backfill happens once.
 func TestRepeatedLookupsAreServedFromTheCache(t *testing.T) {
 	srv := newStub(t, hobbitRoutes())
 	d := testDB(t)
@@ -143,8 +135,6 @@ func TestRepeatedLookupsAreServedFromTheCache(t *testing.T) {
 	}
 }
 
-// A 404 is an answer like any other. Without caching it, every rescan re-asks
-// for the books no provider has — which is most of a Gutenberg library.
 func TestANotFoundIsCachedLikeAnyOtherAnswer(t *testing.T) {
 	srv := newStub(t, nil)
 	cache := NewCache(testDB(t).DB, discard())
@@ -164,8 +154,6 @@ func TestANotFoundIsCachedLikeAnyOtherAnswer(t *testing.T) {
 	}
 }
 
-// A file with neither a title nor an identifier would only ever produce a
-// random book, so it is not worth a request.
 func TestAnUnsearchableFileIsNeverLookedUp(t *testing.T) {
 	srv := newStub(t, hobbitRoutes())
 	r := &Registry{providers: []Provider{testOpenLibrary(srv.URL, nil)}, logger: discard()}
@@ -179,8 +167,7 @@ func TestAnUnsearchableFileIsNeverLookedUp(t *testing.T) {
 	}
 }
 
-// fake stands in for a provider so the registry's own rules — order, kind,
-// failure — are tested without a transport.
+// fake exercises the registry's rules without a transport.
 type fake struct {
 	name  string
 	kinds model.Kind
@@ -205,8 +192,6 @@ func (f *fake) Fetch(_ context.Context, _ Query, _ Candidate) (metadata.Metadata
 	return f.md, nil
 }
 
-// Registration order is precedence order: the first provider to know a field
-// owns it, which is what makes the config file's order meaningful.
 func TestLookupMergesProvidersInRegistrationOrder(t *testing.T) {
 	first := &fake{name: "first", md: metadata.Metadata{
 		Title:     "The Hobbit",
@@ -231,7 +216,6 @@ func TestLookupMergesProvidersInRegistrationOrder(t *testing.T) {
 	}
 }
 
-// Asking Audnexus about an EPUB spends a request to learn nothing.
 func TestAProviderIsNotAskedAboutAKindItDoesNotServe(t *testing.T) {
 	audio := &fake{name: "audio-only", kinds: model.KindAudiobook,
 		md: metadata.Metadata{Title: "The Hobbit"}}
@@ -246,7 +230,6 @@ func TestAProviderIsNotAskedAboutAKindItDoesNotServe(t *testing.T) {
 	}
 }
 
-// One provider failing must not stop the next from answering.
 func TestOneFailingProviderDoesNotStopTheOthers(t *testing.T) {
 	broken := &fake{name: "broken", err: errors.New("service unavailable")}
 	working := &fake{name: "working", md: metadata.Metadata{Title: "The Hobbit"}}
@@ -261,8 +244,6 @@ func TestOneFailingProviderDoesNotStopTheOthers(t *testing.T) {
 	}
 }
 
-// One download is enough: a later provider's artwork would be discarded by the
-// merge anyway.
 func TestOnlyOneProviderIsAskedForTheCover(t *testing.T) {
 	withCover := &fake{name: "with-cover", md: metadata.Metadata{
 		Title: "The Hobbit",
@@ -290,8 +271,6 @@ func (s *spyCover) Fetch(ctx context.Context, q Query, c Candidate) (metadata.Me
 	return s.fake.Fetch(ctx, q, c)
 }
 
-// A backfill is thousands of lookups, and the interval is the whole of what
-// keeps Bard a polite client.
 func TestTheLimiterPacesRequests(t *testing.T) {
 	const (
 		interval = 40 * time.Millisecond

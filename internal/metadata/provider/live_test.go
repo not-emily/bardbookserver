@@ -12,11 +12,9 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-// The live tests query a real provider, so they are opt-in: the rest of the
-// suite must stay offline, and a provider having a bad day is not a build
-// failure. They exist because the recorded shapes elsewhere in this package
-// are only as good as the day they were recorded — both the pooled language
-// list and the redirecting work record were found this way.
+// The live tests are opt-in: the suite must stay offline, and a provider
+// having a bad day is not a build failure. They exist because the recorded
+// shapes elsewhere are only as good as the day they were recorded.
 func liveOrSkip(t *testing.T) {
 	t.Helper()
 	if os.Getenv("BARD_LIVE_PROVIDERS") == "" {
@@ -56,8 +54,7 @@ func TestLiveOpenLibraryAnswersByISBN(t *testing.T) {
 	if len(md.Authors) == 0 {
 		t.Error("no author came back")
 	}
-	// The description lives on the work record, which is the second request and
-	// the one that has to follow a merge redirect.
+	// Reached only through the work record, which may redirect.
 	if md.Description == "" {
 		t.Error("no description came back; the work record may have changed shape")
 	}
@@ -71,8 +68,6 @@ func TestLiveOpenLibraryAnswersByISBN(t *testing.T) {
 	}
 }
 
-// Audnexus is the narrator source, and the only one. It is keyed on the ASIN
-// and has no title search, so this is also the check that the ASIN path works.
 func TestLiveAudnexusAnswersAnASIN(t *testing.T) {
 	liveOrSkip(t)
 
@@ -136,8 +131,7 @@ func TestLiveGoogleBooksAnswersByISBN(t *testing.T) {
 	q := Query{Title: "The Hobbit", ISBN: "9780547952414", Kind: model.KindEbook}
 	candidates, err := p.Search(ctx, q)
 	if errors.Is(err, errQuotaExhausted) {
-		// Keyless, the daily quota is shared with every other anonymous
-		// caller, so it is routinely gone. Not our bug and not a failure.
+		// The keyless quota is shared, so it is routinely gone already.
 		t.Skipf("google books quota is exhausted: %v", err)
 	}
 	if err != nil {
@@ -159,7 +153,6 @@ func TestLiveGoogleBooksAnswersByISBN(t *testing.T) {
 	}
 }
 
-// A title nobody has must come back empty rather than matching something else.
 func TestLiveOpenLibraryRefusesToGuess(t *testing.T) {
 	liveOrSkip(t)
 

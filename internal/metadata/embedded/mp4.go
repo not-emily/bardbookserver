@@ -33,14 +33,13 @@ func ParseM4B(path string) (metadata.Metadata, error) {
 	if d := mp4Duration(f); d != nil {
 		md.DurationSeconds = d
 	}
-	// The long description outranks the comment, which is where tools stamp
-	// things like "Purchased from Libro.fm" — junk that would otherwise stand
-	// as the book's blurb.
+	// Outranks the comment, where stores stamp things like "Purchased from
+	// Libro.fm".
 	if desc := mp4TextAtom(f, "ldes", "desc"); desc != "" {
 		md.Description = desc
 	}
-	// Audible writes the ASIN here, and it is the only thing Audnexus can be
-	// keyed on.
+	// Audible writes the ASIN here; it is the only thing Audnexus can be keyed
+	// on.
 	md.ASIN = metadata.NormalizeASIN(mp4FreeForm(f, "ASIN"))
 	md.Chapters = mp4Chapters(f)
 
@@ -170,8 +169,8 @@ func mp4TextAtom(f *os.File, names ...string) string {
 	return ""
 }
 
-// mp4FreeForm reads an iTunes free-form atom: a `----` box holding a mean, a
-// name and a data child, where the name says which field it is.
+// mp4FreeForm reads an iTunes free-form atom, whose name child says which
+// field it is.
 func mp4FreeForm(f *os.File, want string) string {
 	for _, payload := range mp4Atoms(f, "----") {
 		name, value := mp4AtomFields(payload)
@@ -182,9 +181,8 @@ func mp4FreeForm(f *os.File, want string) string {
 	return ""
 }
 
-// mp4Atoms returns the raw payload of each named atom under ilst. go-mp4 cannot
-// descend into an atom it does not model, which is most of them, so the
-// children are walked by hand.
+// mp4Atoms returns raw payloads because go-mp4 cannot descend into an atom it
+// does not model, which is most of them.
 func mp4Atoms(f *os.File, name string) [][]byte {
 	boxes, err := mp4.ExtractBox(f, nil, mp4.BoxPath{
 		mp4.BoxTypeMoov(), mp4.BoxTypeUdta(), mp4.BoxTypeMeta(),
@@ -208,12 +206,11 @@ func mp4Atoms(f *os.File, name string) [][]byte {
 	return out
 }
 
-// atomDataHeader is the data box's own prefix: a type word naming the encoding,
-// then a locale word.
+// atomDataHeader covers the data box's encoding and locale words.
 const atomDataHeader = 8
 
-// mp4AtomFields pulls the name and the value out of an atom's children. A plain
-// text atom carries only a data child, so its name comes back empty.
+// mp4AtomFields returns an empty name for a plain text atom, which carries only
+// a data child.
 func mp4AtomFields(p []byte) (name, value string) {
 	for off := 0; off+8 <= len(p); {
 		size := int(binary.BigEndian.Uint32(p[off:]))

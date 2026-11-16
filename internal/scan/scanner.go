@@ -34,8 +34,7 @@ type Scanner struct {
 	logger    *slog.Logger
 }
 
-// A nil registry is a scan with no provider enabled, which is the default and
-// makes no outbound request.
+// A nil registry makes no outbound request, which is the default.
 func NewScanner(db *sql.DB, covers *media.Cache, providers *provider.Registry, logger *slog.Logger) *Scanner {
 	return &Scanner{db: db, covers: covers, providers: providers, logger: logger}
 }
@@ -319,9 +318,9 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 			res.Warnings = append(res.Warnings, err)
 		}
 
-		// Highest precedence first. The sidecar appears twice on purpose: its
-		// locked fields outrank the file, the rest only fills what nothing
-		// else could re-derive.
+		// Highest precedence first. The sidecar appears twice: its locked
+		// fields outrank the file, the rest fills only what nothing else can
+		// re-derive.
 		local := metadata.Resolve(
 			entry.LockedMetadata(),
 			parsed.Metadata,
@@ -329,11 +328,16 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 			entry.Metadata(),
 		)
 
-		// Asked with everything known locally, because an untagged file knows
-		// its title only from its path — and outside the transaction below,
-		// since a provider taking ten seconds must not hold a write lock.
-		online, warnings := s.providers.Lookup(ctx,
-			provider.QueryFor(local, c.Format.Kind(), model.ParseFields(entry.Locked)))
+		// Asked outside the transaction below, since a provider taking ten
+		// seconds must not hold a write lock for them.
+		query := provider.QueryFor(local, c.Format.Kind(), model.ParseFields(entry.Locked))
+		if editionID != 0 {
+			if err := s.applyPins(ctx, editionID, &query); err != nil {
+				return err
+			}
+		}
+
+		online, warnings := s.providers.Lookup(ctx, query)
 		res.Warnings = append(res.Warnings, warnings...)
 		if !online.Empty() {
 			res.MetadataEnriched++
@@ -394,7 +398,12 @@ func (s *Scanner) reconcile(ctx context.Context, src *model.Source, c Candidate,
 			return err
 		}
 
-		locks, err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations, res)
+		bookLocks, editionLocks, err := loadLocks(ctx, tx, ref)
+		if err != nil {
+			return err
+		}
+		locks, err := s.applyMetadata(ctx, tx, ref, md, parsed.FileDurations,
+			bookLocks, editionLocks, res)
 		if err != nil {
 			return err
 		}

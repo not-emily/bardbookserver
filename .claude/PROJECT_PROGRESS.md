@@ -8,9 +8,10 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 8 is underway. 8.1 and 8.2 are done: all three providers are implemented,
-Open Library and Audnexus are verified against the live services, and the
-narrator facet now has a source for the first time.
+Phase 8 is nearly done. 8.1 through 8.3 are complete: all three providers are
+implemented, Open Library and Audnexus are verified live, the narrator facet
+has a source for the first time, and a wrong match is now correctable and
+sticky. Only the taxonomy (8.4) is left.
 
 ## Active Tasks
 - [IN PROGRESS] Phase 8: Metadata providers & taxonomy
@@ -18,8 +19,8 @@ narrator facet now has a source for the first time.
     default, Open Library, response caching, rate limiting, match scoring
   - ✅ 8.2: Google Books with a daily-quota breaker, Audnexus with narrators
     and chapters, plus the M4B ASIN extraction Audnexus cannot work without
-  - ⏭ 8.3: candidate ranking for Fix Match, `POST /api/v1/books/{id}/match`,
-    a provider match pinned so a rescan does not undo a correction
+  - ✅ 8.3: candidate ranking, Fix Match over `/api/v1/books/{id}/match`,
+    pinned matches honoured by a rescan, locks and sidecar written on apply
   - ⏭ 8.4: canonical genre list, BISAC parser, subject mapping, `raw_subjects`
     retention, suggested `min_age`
   - ⏭ Genres are still empty; they need 8.4. Subjects now arrive from all
@@ -95,7 +96,22 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-16] Phase 8.2: Google Books and Audnexus (uncommitted)
+- [2026-11-16] Phase 8.3: matching and correction (uncommitted)
+  - Fix Match resolves to one edition, since a provider record describes one
+    manifestation; a book with several needs `edition_id` and a 400 says so
+  - Applying pins, locks the fields the record filled, and writes the sidecar —
+    three layers because each survives a different loss
+  - The chosen record is re-found by re-running the cached search rather than
+    held between requests; the query is stored on the pin so a retitled file
+    cannot make the pinned id unfindable
+  - `applyMetadata` now takes the locks to honour, so a scan can respect a
+    correction where Fix Match overwrites one
+  - An automatic match is not pinned, leaving a better score free to win
+  - Comment pass over everything written this phase, against the convention in
+    `~/.claude/CLAUDE.md`: war stories and "what" comments removed, multi-line
+    comments collapsed, roughly 40% fewer comment lines
+  - 377 tests pass, race-clean
+- [2026-11-16] Phase 8.2: Google Books and Audnexus (committed, 81dddfd)
   - Audnexus leads the registry: the only narrator source, and it declines
     every ebook, so Open Library still leads for those
   - Verified live: narrators, four chapters, and "english" folded to "en"
@@ -176,17 +192,20 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 8.3: matching and correction — candidate ranking, Fix Match, and making
-a correction stick.
+Phase 8.4: taxonomy — the canonical genre list, the BISAC parser, the subject
+mapping table, `raw_subjects` retention, and suggested ages.
 
-What is ready: `provider.Rank` already scores and orders every candidate
-including the ones below the threshold, which is exactly what Fix Match has to
-show. `Best` is the only caller that applies the threshold, so the manual path
-needs no new scoring. Field locking already works end to end and is pinned by
-`TestALockedFieldOutranksTheProvider`.
+What is ready: all three providers already return subjects, normalised and
+capped. Google Books' BISAC headings are split into parts, so
+"Fiction / Fantasy / Epic" offers three strings to map rather than one.
+`genres`, `book_genres` and `raw_subjects` exist from Phase 3 and are empty.
+`googleVolumeInfo.MaturityRating` and `audnexusBook.IsAdult` are parsed and
+waiting for the age-suggestion consumer.
 
-What 8.3 has to add: a `provider_matches` table pinning an edition to a
-provider identity so a rescan re-fetches the chosen record instead of searching
-again, a `Candidate` DTO (it carries an unexported payload today, so it cannot
-be serialised as-is), and the handler itself. Applying a match must also set
-the lock bits, or the next scan undoes it.
+What 8.4 has to add: `internal/taxonomy` does not exist yet. The BISAC parser
+serves both the genre facet and Phase 9's suggested age (`JUV` and `YAF`
+prefixes) — one parser, two readers. A suggested age goes to its own column,
+never to `books.min_age`, because an auto-applied wrong rating fails open.
+
+Also worth doing in or near 8.4: `metadata.NormalizeLanguage`'s three-letter
+table lives in `internal/metadata` and arguably belongs with the taxonomy.

@@ -13,31 +13,42 @@ import (
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/media"
+	"github.com/not-emily/bardbookserver/internal/metadata/provider"
+	"github.com/not-emily/bardbookserver/internal/scan"
 	"github.com/not-emily/bardbookserver/internal/space"
 )
 
 const shutdownGrace = 15 * time.Second
 
 type Server struct {
-	cfg     *config.Config
-	db      *db.DB
-	store   *auth.Store
-	space   *space.Store
-	covers  *media.Cache
-	logger  *slog.Logger
-	version string
+	cfg       *config.Config
+	db        *db.DB
+	store     *auth.Store
+	space     *space.Store
+	covers    *media.Cache
+	providers *provider.Registry
+	scanner   *scan.Scanner
+	logger    *slog.Logger
+	version   string
 
 	loginLimiter *auth.Limiter
 	pinLimiter   *auth.Limiter
 }
 
 func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version string) *Server {
+	covers := media.NewCache(cfg.CoverCacheDir())
+	providers := provider.New(cfg.Metadata, database.DB, logger)
+
 	return &Server{
-		cfg:          cfg,
-		db:           database,
-		store:        auth.NewStore(database.DB),
-		space:        space.NewStore(database),
-		covers:       media.NewCache(cfg.CoverCacheDir()),
+		cfg:       cfg,
+		db:        database,
+		store:     auth.NewStore(database.DB),
+		space:     space.NewStore(database),
+		covers:    covers,
+		providers: providers,
+		// Fix Match writes metadata into the index, which is the scanner's job
+		// whether a file change or a person triggered it.
+		scanner:      scan.NewScanner(database.DB, covers, providers, logger),
 		logger:       logger,
 		version:      version,
 		loginLimiter: auth.NewLimiter(loginAttempts, loginWindow),
@@ -87,6 +98,9 @@ func (s *Server) handler() http.Handler {
 	authed.HandleFunc("DELETE /api/v1/collections/{id}", s.handleDeleteCollection)
 	authed.HandleFunc("PUT /api/v1/collections/{id}/books/{bookID}", s.handleAddToCollection)
 	authed.HandleFunc("DELETE /api/v1/collections/{id}/books/{bookID}", s.handleRemoveFromCollection)
+	authed.HandleFunc("GET /api/v1/books/{id}/match", s.handleSearchMatches)
+	authed.HandleFunc("POST /api/v1/books/{id}/match", s.handleApplyMatch)
+	authed.HandleFunc("DELETE /api/v1/books/{id}/match", s.handleClearMatch)
 	authed.HandleFunc("GET /api/v1/groupings/uncertain", s.handleListUncertainGroupings)
 	authed.HandleFunc("POST /api/v1/editions/{id}/group", s.handleMergeEdition)
 	authed.HandleFunc("DELETE /api/v1/editions/{id}/group", s.handleSplitEdition)

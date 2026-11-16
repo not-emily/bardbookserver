@@ -14,19 +14,16 @@ import (
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
-const openLibraryBase = "https://openlibrary.org"
+const (
+	openLibraryBase   = "https://openlibrary.org"
+	openLibraryCovers = "https://covers.openlibrary.org"
+)
 
-// openLibraryCovers is a separate host, and a cover is bytes rather than JSON,
-// so it does not ride the response cache.
-const openLibraryCovers = "https://covers.openlibrary.org"
-
-// olSearchFields asks for exactly what scoring and the merge use. The default
-// response is an order of magnitude larger, most of it holdings data.
+// olSearchFields narrows a default response that is mostly holdings data.
 const olSearchFields = "key,title,subtitle,author_name,first_publish_year," +
 	"isbn,publisher,language,number_of_pages_median,cover_i,subject"
 
-// olMaxSubjects caps what a work can contribute to the taxonomy. Open Library
-// pools subjects across every edition, so popular titles carry hundreds.
+// olMaxSubjects caps a pooled list that runs into the hundreds.
 const olMaxSubjects = 40
 
 type openLibrary struct {
@@ -42,8 +39,8 @@ func newOpenLibrary(c *client) *openLibrary {
 
 func (o *openLibrary) Name() string { return config.ProviderOpenLibrary }
 
-// Open Library catalogues works rather than recordings, so it answers for an
-// audiobook's title and author even though it knows nothing about narration.
+// Open Library catalogues works, so it answers for an audiobook's title and
+// author even knowing nothing about narration.
 func (o *openLibrary) Serves(model.Kind) bool { return true }
 
 func (o *openLibrary) Search(ctx context.Context, q Query) ([]Candidate, error) {
@@ -67,7 +64,7 @@ func (o *openLibrary) Search(ctx context.Context, q Query) ([]Candidate, error) 
 	return out, nil
 }
 
-// searchParams prefers the ISBN, which answers with the one work rather than
+// searchParams prefers the ISBN, which answers with one work rather than
 // everything sharing a title.
 func (o *openLibrary) searchParams(q Query) url.Values {
 	params := url.Values{"fields": {olSearchFields}, "limit": {"5"}}
@@ -101,8 +98,8 @@ func (o *openLibrary) candidate(q Query, doc olDoc) Candidate {
 	return c
 }
 
-// Fetch reads the work for its description, which is the one field worth a
-// second request: the search response has everything else.
+// Fetch spends a second request only on the description; the search response
+// holds everything else.
 func (o *openLibrary) Fetch(ctx context.Context, q Query, c Candidate) (metadata.Metadata, error) {
 	doc, ok := c.payload.(olDoc)
 	if !ok {
@@ -120,21 +117,20 @@ func (o *openLibrary) Fetch(ctx context.Context, q Query, c Candidate) (metadata
 	if doc.FirstPublishYear > 0 {
 		md.PublishedOn = strconv.Itoa(doc.FirstPublishYear)
 	}
-	// The search pools every edition's language, so The Hobbit answers with 32
-	// of them. Only a single entry says anything about this book.
+	// Languages are pooled across editions — The Hobbit answers with 32 — so
+	// only a single entry says anything about this book.
 	if len(doc.Language) == 1 {
 		md.Language = metadata.NormalizeLanguage(doc.Language[0])
 	}
-	// The median across editions is an estimate, which is why it is offered
-	// only where the file itself could not say.
+	// A median across editions is an estimate, so it is offered only where the
+	// file could not say.
 	if q.WantPageCount && doc.PagesMedian != nil && *doc.PagesMedian > 0 {
 		md.PageCount = doc.PagesMedian
 	}
 
 	work, err := o.work(ctx, doc.Key)
 	if err != nil {
-		// A missing work record costs the description and nothing else, so the
-		// candidate still stands on what the search returned.
+		// Costs the description alone; the candidate still stands.
 		o.client.logger.Debug("openlibrary work unavailable",
 			"work", doc.Key, "error", err)
 	} else {
@@ -156,9 +152,8 @@ func (o *openLibrary) Fetch(ctx context.Context, q Query, c Candidate) (metadata
 	return md, nil
 }
 
-// work follows one redirect, because a merged work keeps answering under its
-// old key with nothing but a pointer — which is what a search returns for The
-// Hobbit. One hop only, so a cycle cannot hold the scan.
+// work follows one hop, since a merged work answers under its old key with
+// nothing but a pointer. One hop only, so a cycle cannot hold the scan.
 func (o *openLibrary) work(ctx context.Context, key string) (olWork, error) {
 	var work olWork
 	if err := o.client.getJSON(ctx, o.base+key+".json", &work); err != nil {
@@ -183,8 +178,7 @@ func (o *openLibrary) cover(ctx context.Context, target string) (*metadata.Cover
 	if err != nil {
 		return nil, err
 	}
-	// Open Library answers a missing cover with a 1-pixel placeholder rather
-	// than a 404, and the cover cache would happily store it.
+	// A missing cover comes back as a 1-pixel placeholder, not a 404.
 	if len(body) < 1024 {
 		return nil, fmt.Errorf("cover %s is %d bytes, which is a placeholder", target, len(body))
 	}
@@ -209,8 +203,8 @@ type olDoc struct {
 	Subject          []string `json:"subject"`
 }
 
-// pickISBN carries the one that matches what the file said, because a doc
-// lists every edition's ISBN and only one of them is this book's.
+// pickISBN prefers what the file said, since a doc lists every edition's ISBN
+// and only one of them is this book's.
 func (d olDoc) pickISBN(want string) string {
 	if wanted := metadata.ISBN13(want); wanted != "" {
 		for _, candidate := range d.ISBN {
@@ -242,8 +236,8 @@ func (w olWork) redirect() bool {
 	return w.Type.Key == "/type/redirect" && strings.HasPrefix(w.Location, "/works/")
 }
 
-// olText absorbs Open Library's two shapes for one field: older records hold a
-// bare string where newer ones hold a typed object.
+// olText absorbs two shapes: older records hold a bare string, newer ones a
+// typed object.
 type olText struct {
 	Value string
 }

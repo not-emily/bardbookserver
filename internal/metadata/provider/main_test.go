@@ -34,8 +34,8 @@ func testDB(t *testing.T) *db.DB {
 	return d
 }
 
-// stub is an upstream that counts what it was asked, which is how the cache
-// and rate-limit claims are checked rather than assumed.
+// stub counts what it was asked, so the cache and pacing claims are checked
+// rather than assumed.
 type stub struct {
 	*httptest.Server
 
@@ -67,8 +67,8 @@ func newStub(t *testing.T, routes map[string]func(http.ResponseWriter, *http.Req
 	return s
 }
 
-// handle adds a route after the server is up, which is how a response body can
-// name the stub's own address.
+// handle adds a route after the server is up, so a response body can name the
+// stub's own address.
 func (s *stub) handle(path string, route func(http.ResponseWriter, *http.Request)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,8 +108,7 @@ func replaceBase(body, base string) string {
 	return strings.ReplaceAll(body, "http://REPLACED", base)
 }
 
-// testClient paces at nothing: the limiter is tested on its own, and every
-// other test would otherwise pay half a second a request.
+// testClient paces at nothing; the limiter is tested on its own.
 func testClient(cache *Cache) *client {
 	return &client{
 		provider: config.ProviderOpenLibrary,
@@ -120,8 +119,8 @@ func testClient(cache *Cache) *client {
 	}
 }
 
-// testOpenLibrary points the provider at a stub. The production constructors
-// keep the real hosts, so there is no test-only seam in them.
+// The hosts are overridden here rather than in the constructors, so there is
+// no test-only seam in production code.
 func testOpenLibrary(base string, cache *Cache) *openLibrary {
 	p := newOpenLibrary(testClient(cache))
 	p.base, p.covers = base, base

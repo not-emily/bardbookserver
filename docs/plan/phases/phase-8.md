@@ -41,8 +41,11 @@ anything, and no parser produced one. See the decision log.
 - `internal/taxonomy/genres.go` — canonical list
 - `internal/taxonomy/mapping.go` — subject string → canonical genre
 - `internal/taxonomy/bisac.go` — BISAC parsing, shared with age suggestion
-- `internal/db/migrations/0008_metadata.sql` — cache, suggestions, locks
+- `internal/db/migrations/0010_metadata.sql` — response cache
+- `internal/db/migrations/0011_matches.sql` — pinned matches
 - `internal/api/match_handlers.go`
+- `internal/scan/match.go`, `internal/scan/matches.go` — applying and pinning
+- `internal/policy/match.go`
 
 ## Dependencies
 
@@ -97,7 +100,8 @@ Metadata lookup sends titles to third parties, so every provider is off until ex
       all, since Audnexus has no title search)*
 - [x] Local `chpl` chapters win over provider chapters when both exist
 - [x] A hand-edited title survives a metadata refresh
-- [ ] Fix Match search returns ranked candidates and applying one replaces the metadata
+- [x] Fix Match search returns ranked candidates and applying one replaces the metadata
+      *(8.3: a book with several editions must name one with `edition_id`)*
 - [x] A provider returning 500 or timing out leaves the scan successful with embedded metadata
 - [x] All providers disabled means no outbound HTTP during a scan
 - [x] Repeated scans do not re-request cached lookups

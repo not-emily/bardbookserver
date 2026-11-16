@@ -14,28 +14,19 @@ import (
 	"time"
 )
 
-// maxBodyBytes bounds what a provider can hand back. A metadata record is
-// kilobytes; anything near this is a service having a bad day.
-const maxBodyBytes = 4 << 20
+const (
+	maxBodyBytes  = 4 << 20
+	maxCoverBytes = 16 << 20
+	attempts      = 3
+)
 
-// maxCoverBytes matches the embedded parsers' ceiling on artwork.
-const maxCoverBytes = 16 << 20
-
-// attempts covers a rate limit or a transient fault. Beyond that the provider
-// is treated as down, which degrades to embedded metadata.
-const attempts = 3
-
-// errNotFound separates "no provider has this book" from "the provider is
-// broken": the first is a cacheable answer, the second is retried and warned
-// about.
+// errNotFound is a cacheable answer; anything else is retried.
 var errNotFound = errors.New("not found")
 
-// errQuotaExhausted is a third answer: the provider is working and has refused
-// us for the rest of the day. Retrying is pointless and rude.
 var errQuotaExhausted = errors.New("daily quota exhausted")
 
-// client is the only way out of this package. Every request is paced, cached,
-// retried and size-bounded here so no provider has to remember to be polite.
+// client is the only way out of this package, so no provider has to remember
+// to be polite.
 type client struct {
 	provider string
 	http     *http.Client
@@ -56,8 +47,8 @@ func (c *client) getJSON(ctx context.Context, url string, out any) error {
 	return nil
 }
 
-// get returns a cached body without spending a request or a rate-limit slot,
-// which is what makes a rescan free.
+// get spends neither a request nor a rate-limit slot on a cache hit, which is
+// what makes a rescan free.
 func (c *client) get(ctx context.Context, url string) ([]byte, error) {
 	if status, body, ok := c.cache.Get(ctx, c.provider, url); ok {
 		if status == http.StatusNotFound {
@@ -65,8 +56,8 @@ func (c *client) get(ctx context.Context, url string) ([]byte, error) {
 		}
 		return body, nil
 	}
-	// After the cache, so a backfill that ran out of quota still serves
-	// everything it already asked for.
+	// Checked after the cache, so an exhausted backfill still serves what it
+	// already asked for.
 	if c.breaker.open() {
 		return nil, errQuotaExhausted
 	}
@@ -83,8 +74,8 @@ func (c *client) get(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
-// getBytes is the cover path: artwork is not cached in the database, since the
-// cover cache already content-addresses what was kept.
+// getBytes skips the response cache: the cover cache already
+// content-addresses whatever was kept.
 func (c *client) getBytes(ctx context.Context, url string) ([]byte, error) {
 	if c.breaker.open() {
 		return nil, errQuotaExhausted
@@ -100,9 +91,6 @@ func (c *client) getBytes(ctx context.Context, url string) ([]byte, error) {
 	return body, nil
 }
 
-// fetch retries a rate limit or a server fault, honouring Retry-After when the
-// service bothers to send one. A 404 is returned rather than retried, so the
-// caller can cache it.
 func (c *client) fetch(ctx context.Context, url string, limit int64) (int, []byte, error) {
 	var (
 		lastErr error
@@ -127,8 +115,7 @@ func (c *client) fetch(ctx context.Context, url string, limit int64) (int, []byt
 			return 0, nil, err
 		}
 
-		// The service's own answer wins over our schedule when it asks for
-		// longer than we would have waited.
+		// Retry-After wins when it is longer than our own backoff.
 		lastErr, wait = err, max(backoff(attempt), asked)
 		c.logger.Debug("provider request failed",
 			"provider", c.provider, "url", url, "attempt", attempt+1, "error", err)
@@ -136,8 +123,8 @@ func (c *client) fetch(ctx context.Context, url string, limit int64) (int, []byt
 	return 0, nil, lastErr
 }
 
-// once reports a retryable condition as an error and everything else as a
-// status for the caller to cache.
+// once returns an error for a retryable condition and a status for anything
+// the caller may cache.
 func (c *client) once(ctx context.Context, url string, limit int64) (int, []byte, time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -154,8 +141,8 @@ func (c *client) once(ctx context.Context, url string, limit int64) (int, []byte
 
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden:
-		// A rate limit is worth waiting out; a daily quota is not, and only the
-		// body says which this is.
+		// A rate limit is worth waiting out, a daily quota is not, and only the
+		// body tells them apart.
 		refusal, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if isDailyQuota(refusal) {
 			c.breaker.trip()
@@ -182,8 +169,7 @@ func (c *client) once(ctx context.Context, url string, limit int64) (int, []byte
 	return resp.StatusCode, body, 0, nil
 }
 
-// userAgent names Bard so a provider can see who is asking, which is what
-// their terms ask for.
+// userAgent identifies Bard, which these services' terms ask for.
 const userAgent = "bardbookserver (+https://github.com/not-emily/bardbookserver)"
 
 func retryAfter(resp *http.Response) time.Duration {
@@ -191,8 +177,8 @@ func retryAfter(resp *http.Response) time.Duration {
 	if err != nil || seconds <= 0 {
 		return 0
 	}
-	// A service asking for an hour is answered by giving up on this book, not
-	// by holding the scan open.
+	// Capped: a service asking for an hour is answered by giving up on this
+	// book rather than holding the scan open.
 	if seconds > 60 {
 		seconds = 60
 	}
@@ -218,9 +204,6 @@ func sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// isDailyQuota reads the refusal rather than guessing from the status, because
-// Google answers both a per-minute rate limit and a per-day quota with 429 and
-// only the body distinguishes them.
 func isDailyQuota(refusal []byte) bool {
 	body := strings.ToLower(string(refusal))
 	for _, marker := range []string{"per day", "dailylimitexceeded", "quotaexceeded"} {
@@ -231,11 +214,9 @@ func isDailyQuota(refusal []byte) bool {
 	return false
 }
 
-// breaker stops asking a provider that has refused us for the day. Google Books
-// states its limit as a thousand queries a day rather than a rate, and without
-// a key that quota is shared with every other anonymous caller — so a local
-// count could not track it, and the service's own refusal is the only reliable
-// signal. A nil breaker never trips, which is what a test gets.
+// breaker stops asking a provider that refused us for the day. Keyless, the
+// Google Books daily quota is shared with every other anonymous caller, so a
+// local count cannot track it and its refusal is the only reliable signal.
 type breaker struct {
 	mu    sync.Mutex
 	until time.Time
@@ -250,7 +231,7 @@ func (b *breaker) open() bool {
 	return time.Now().Before(b.until)
 }
 
-// trip holds until the next UTC midnight, which is when a daily quota resets.
+// trip holds until the next UTC midnight, when a daily quota resets.
 func (b *breaker) trip() {
 	if b == nil {
 		return
@@ -263,12 +244,11 @@ func (b *breaker) trip() {
 		AddDate(0, 0, 1)
 }
 
-// politeInterval is the floor on how often one provider is asked anything: a
-// 5000-book backfill at two requests a second is under an hour, once.
+// politeInterval puts a 5000-book backfill under an hour.
 const politeInterval = 500 * time.Millisecond
 
-// limiter paces one provider. The slot is claimed under the lock and waited
-// for outside it, so a cancelled lookup does not hold the next one up.
+// limiter claims the slot under the lock and waits for it outside, so a
+// cancelled lookup does not hold the next one up.
 type limiter struct {
 	mu       sync.Mutex
 	interval time.Duration
