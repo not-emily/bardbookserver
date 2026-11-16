@@ -106,6 +106,36 @@ match takes a person to notice and undo.
 An author folder named with a surname alone agrees with a provider's full name,
 since that is how the recommended layout is usually written.
 
+## Genres and subjects
+
+Provider subject data is filthy. The same book arrives as
+`FICTION / Fantasy / Epic`, `Fantasy fiction`, `fantasy` and
+`Juvenile Fiction / Fantasy & Magic` depending on where it came from, so Bard
+maps what it recognises onto a canonical list of 44 genres and **keeps the rest
+verbatim** in `raw_subjects`. A gap in the mapping table makes the facet less
+useful; it never loses data.
+
+A handful of strings that say nothing about a book — "Fiction", "General",
+"In library" — are dropped rather than kept, since they would otherwise attach
+to every title in the library.
+
+One thing to expect: **Open Library pools subjects across every edition of a
+work**, so a title with a graphic-novel adaptation picks up `comics`, and one
+with a film tie-in picks up oddities. The mapping is right and the source data
+is over-broad. Locking a book's genres by hand is the fix for a specific title.
+
+## Suggested ages
+
+Where a provider says who a book is for, Bard records a **suggested** minimum
+age — 8 for BISAC's juvenile headings and `JUV`/`JNF` codes, 12 for young adult
+and `YAF`/`YAN`, 18 where a provider flags the content as adult. The strongest
+signal wins.
+
+This is written to `books.suggested_min_age` and **never** to `books.min_age`.
+A rating applied automatically without anyone seeing it fails *open* when it is
+wrong, which is the exact failure the age gate exists to prevent. Phase 11
+surfaces these suggestions for bulk confirmation.
+
 ## Fix Match
 
 When a provider picks the wrong book, or refuses to pick one, an admin can

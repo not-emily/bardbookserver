@@ -27,6 +27,10 @@ type Metadata struct {
 	DurationSeconds *float64
 	Abridged        *bool
 
+	// Mature is a provider's own maturity flag, which feeds the age suggestion
+	// and never the age gate.
+	Mature *bool
+
 	Subjects []string
 	Chapters []Chapter
 	Cover    *Cover
@@ -92,6 +96,9 @@ func fill(dst *Metadata, src Metadata) {
 	}
 	if dst.Abridged == nil {
 		dst.Abridged = src.Abridged
+	}
+	if dst.Mature == nil {
+		dst.Mature = src.Mature
 	}
 	if len(dst.Chapters) == 0 {
 		dst.Chapters = src.Chapters

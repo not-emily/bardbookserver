@@ -8,23 +8,24 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 8 is nearly done. 8.1 through 8.3 are complete: all three providers are
-implemented, Open Library and Audnexus are verified live, the narrator facet
-has a source for the first time, and a wrong match is now correctable and
-sticky. Only the taxonomy (8.4) is left.
+Phase 8 is complete. All four sub-phases are in: three providers, Fix Match,
+and the taxonomy. Every empty facet this phase existed to fill — narrator,
+genre, and page count for EPUBs — now has a source. Phase 9 (age gating) is
+next and its suggested ages are already being written.
 
 ## Active Tasks
-- [IN PROGRESS] Phase 8: Metadata providers & taxonomy
+- [DONE] Phase 8: Metadata providers & taxonomy
   - ✅ 8.1: `Provider` interface, explicit registry, config toggles off by
     default, Open Library, response caching, rate limiting, match scoring
   - ✅ 8.2: Google Books with a daily-quota breaker, Audnexus with narrators
     and chapters, plus the M4B ASIN extraction Audnexus cannot work without
   - ✅ 8.3: candidate ranking, Fix Match over `/api/v1/books/{id}/match`,
     pinned matches honoured by a rescan, locks and sidecar written on apply
-  - ⏭ 8.4: canonical genre list, BISAC parser, subject mapping, `raw_subjects`
-    retention, suggested `min_age`
-  - ⏭ Genres are still empty; they need 8.4. Subjects now arrive from all
-    three providers and are waiting on the mapping table
+  - ✅ 8.4: 44 canonical genres, BISAC parser shared with the age suggestion,
+    ~230 subject aliases, `raw_subjects` retention, `suggested_min_age`
+- [NEXT] Phase 9: Kids & age gating — `birth_date`, `min_age`, overrides, the
+  View/Read/Save split, unlocked-first sort, and the suggestion queue
+- [LATER] Phase 10 (upload), 11 (admin UI), 12 (packaging)
 - [LATER] Phase 9 (age gating) — extends `BookScope.Apply`; wants Phase 8's
   suggested ages but can be built against hand-set ones
 - [LATER] Phase 10 (upload) — independent of 8 and 9
@@ -53,11 +54,17 @@ Nothing is blocked. These are known limitations carried forward.
   was already exhausted every time it was probed, so the fixtures come from the
   documented shape rather than a recorded response. The breaker handling that
   429 *is* verified live.
-- Genres are still empty; nothing maps a subject string onto `book_genres`
-  until 8.4. Subjects now arrive from all three providers — Open Library capped
-  at 40, Google Books' BISAC headings split into parts and capped at 20.
-- `googleVolumeInfo.MaturityRating` and `audnexusBook.IsAdult` are parsed and
-  unused; they are 8.4's age-suggestion inputs.
+- **Open Library pools subjects across every edition of a work**, so The Hobbit
+  classifies as fantasy, classics *and* comics — the last from a graphic-novel
+  adaptation in the pooled list. Verified against the live service: 40 subjects
+  in, 3 genres and 31 raw subjects out. The mapping is right and the source is
+  over-broad; locking a book's genres is the per-title fix.
+- `raw_subjects.provider` is always NULL. `Resolve` takes one provider's
+  subject list wholesale without recording whose.
+- The alias table is ~230 entries and will need additions as oddly-tagged books
+  arrive. `TestEveryAliasPointsAtACanonicalGenre` catches a typo'd slug, which
+  would otherwise fail at scan time rather than in the suite.
+- `genres.parent_id` from Phase 3 is unused: the canonical list is flat.
 - The EPUB parser produces no page count, but Open Library's
   `number_of_pages_median` now fills it where a provider is enabled, so an
   enriched EPUB lands in a length bucket. Without a provider the EPUBs still
@@ -96,7 +103,18 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-16] Phase 8.3: matching and correction (uncommitted)
+- [2026-11-16] Phase 8.4: the taxonomy (uncommitted)
+  - 44 canonical genres, flat, with the row inserted on demand so the table
+    cannot drift from the list and the facet lists only what exists
+  - One BISAC parser serving both the genre facet and the age suggestion
+  - Found and fixed: Google Books was splitting its own headings in 8.2, so
+    Open Library's `FICTION / Fantasy / Epic` matched nothing. Splitting moved
+    into the taxonomy, which fixes every provider at once
+  - Found and fixed: `sidecar.LockedMetadata` never returned `Subjects`, so a
+    hand-locked genre had no effect whatsoever
+  - A suggested age is written to its own column and never to `min_age`
+  - Verified against live Open Library subject data rather than only fixtures
+- [2026-11-16] Phase 8.3: matching and correction (committed, 5ce7242)
   - Fix Match resolves to one edition, since a provider record describes one
     manifestation; a book with several needs `edition_id` and a 400 says so
   - Applying pins, locks the fields the record filled, and writes the sidecar —
@@ -192,20 +210,22 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 8.4: taxonomy — the canonical genre list, the BISAC parser, the subject
-mapping table, `raw_subjects` retention, and suggested ages.
+Phase 9: kids and age gating.
 
-What is ready: all three providers already return subjects, normalised and
-capped. Google Books' BISAC headings are split into parts, so
-"Fiction / Fantasy / Epic" offers three strings to map rather than one.
-`genres`, `book_genres` and `raw_subjects` exist from Phase 3 and are empty.
-`googleVolumeInfo.MaturityRating` and `audnexusBook.IsAdult` are parsed and
-waiting for the age-suggestion consumer.
+What is ready: `books.suggested_min_age` is already being written, so the
+Phase 11 confirmation queue has data to show and Phase 9 can be tested against
+both hand-set and suggested ages. `model.EffectiveMinAge` and
+`db.EffectiveMinAgeSQL` exist from Phase 3 with `TestEffectiveMinAgeMatchesSQL`
+holding them together. `BookScope.Apply` is the one function every read path
+composes through — listings, search, facets, by-id detail, file content,
+covers, progress, annotations and the sync manifest — so the age ladder goes in
+one place.
 
-What 8.4 has to add: `internal/taxonomy` does not exist yet. The BISAC parser
-serves both the genre facet and Phase 9's suggested age (`JUV` and `YAF`
-prefixes) — one parser, two readers. A suggested age goes to its own column,
-never to `books.min_age`, because an auto-applied wrong rating fails open.
+What Phase 9 has to add: `BookPolicy` beside the scope with the View/Read/Save
+split, per-user allow/deny overrides, `hide_when_locked` honoured per source,
+and the SQL-computed `unlocked` sort key — it has to be SQL because sorting and
+pagination both depend on it.
 
-Also worth doing in or near 8.4: `metadata.NormalizeLanguage`'s three-letter
-table lives in `internal/metadata` and arguably belongs with the taxonomy.
+Worth deciding early: a locked book is still saveable to a user's space, and
+the plan wants it sorted below readable ones rather than hidden, except where
+the source says otherwise.

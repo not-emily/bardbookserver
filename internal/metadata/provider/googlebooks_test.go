@@ -46,7 +46,7 @@ func googleStub(t *testing.T) *stub {
 	return srv
 }
 
-func TestGoogleBooksFillsTheDescriptionAndSplitsCategories(t *testing.T) {
+func TestGoogleBooksFillsTheDescriptionAndCategories(t *testing.T) {
 	srv := googleStub(t)
 	p := testGoogleBooks(srv.URL, "", nil)
 
@@ -85,8 +85,8 @@ func TestGoogleBooksFillsTheDescriptionAndSplitsCategories(t *testing.T) {
 		t.Errorf("page count is %v", md.PageCount)
 	}
 
-	// "Fantasy" appears in both headings and must not repeat.
-	want := []string{"Fiction", "Fantasy", "General", "Juvenile Fiction", "Fantasy & Magic"}
+	// Headings stay whole; the taxonomy splits them.
+	want := []string{"Fiction / Fantasy / General", "Juvenile Fiction / Fantasy & Magic"}
 	if len(md.Subjects) != len(want) {
 		t.Fatalf("subjects are %v, want %v", md.Subjects, want)
 	}

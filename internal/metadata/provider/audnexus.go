@@ -94,6 +94,8 @@ func (a *audnexus) Fetch(ctx context.Context, q Query, c Candidate) (metadata.Me
 		abridged := strings.EqualFold(book.FormatType, "abridged")
 		md.Abridged = &abridged
 	}
+	mature := book.IsAdult
+	md.Mature = &mature
 
 	// Never the duration: Audnexus reports Audible's edition to the minute,
 	// and the file that plays is the authority on its own length.

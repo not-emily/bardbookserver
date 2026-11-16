@@ -116,6 +116,10 @@ func (g *googleBooks) Fetch(ctx context.Context, q Query, c Candidate) (metadata
 		pages := info.PageCount
 		md.PageCount = &pages
 	}
+	if info.MaturityRating != "" {
+		mature := info.MaturityRating == "MATURE"
+		md.Mature = &mature
+	}
 
 	if q.WantCover && c.CoverURL != "" {
 		if cover, err := g.cover(ctx, c.CoverURL); err != nil {
@@ -139,23 +143,22 @@ func (g *googleBooks) cover(ctx context.Context, target string) (*metadata.Cover
 	return &metadata.Cover{Data: body, MIME: "image/jpeg"}, nil
 }
 
-// googleSubjects splits a BISAC heading, so "Fiction / Fantasy / Epic" gives
-// the taxonomy three chances to map rather than one string to miss on.
+// googleSubjects keeps the BISAC headings whole; the taxonomy splits them, so
+// a heading stays readable in raw_subjects when nothing maps.
 func googleSubjects(categories []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(categories))
 
 	for _, category := range categories {
-		for _, part := range strings.Split(category, "/") {
-			part = strings.TrimSpace(part)
-			if part == "" || seen[strings.ToLower(part)] {
-				continue
-			}
-			seen[strings.ToLower(part)] = true
-			out = append(out, part)
-			if len(out) == googleMaxSubjects {
-				return out
-			}
+		category = strings.TrimSpace(category)
+		if category == "" || seen[strings.ToLower(category)] {
+			continue
+		}
+		seen[strings.ToLower(category)] = true
+
+		out = append(out, category)
+		if len(out) == googleMaxSubjects {
+			return out
 		}
 	}
 	return out

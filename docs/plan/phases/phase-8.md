@@ -41,6 +41,8 @@ anything, and no parser produced one. See the decision log.
 - `internal/taxonomy/genres.go` — canonical list
 - `internal/taxonomy/mapping.go` — subject string → canonical genre
 - `internal/taxonomy/bisac.go` — BISAC parsing, shared with age suggestion
+- `internal/scan/genres.go` — writing the facet, raw subjects and the suggestion
+- `internal/db/migrations/0012_suggestions.sql` — `books.suggested_min_age`
 - `internal/db/migrations/0010_metadata.sql` — response cache
 - `internal/db/migrations/0011_matches.sql` — pinned matches
 - `internal/api/match_handlers.go`
@@ -106,6 +108,6 @@ Metadata lookup sends titles to third parties, so every provider is off until ex
 - [x] All providers disabled means no outbound HTTP during a scan
 - [x] Repeated scans do not re-request cached lookups
 - [x] Rate limiting holds a backfill within each provider's documented limits
-- [ ] Known-dirty subject strings map to one canonical genre
-- [ ] An unmappable subject is retained in `raw_subjects`
-- [ ] A `JUV`-prefixed BISAC code produces a suggested age and leaves `books.min_age` untouched
+- [x] Known-dirty subject strings map to one canonical genre
+- [x] An unmappable subject is retained in `raw_subjects`
+- [x] A `JUV`-prefixed BISAC code produces a suggested age and leaves `books.min_age` untouched

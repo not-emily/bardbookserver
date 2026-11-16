@@ -10,6 +10,7 @@ import (
 
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/model"
+	"github.com/not-emily/bardbookserver/internal/taxonomy"
 )
 
 // The live tests are opt-in: the suite must stay offline, and a provider
@@ -65,6 +66,15 @@ func TestLiveOpenLibraryAnswersByISBN(t *testing.T) {
 	}
 	if len(md.Subjects) > olMaxSubjects {
 		t.Errorf("%d subjects came back, want at most %d", len(md.Subjects), olMaxSubjects)
+	}
+
+	// Real subject data is the only honest test of the alias table: Open
+	// Library's list for this book runs to dozens of entries, most of them
+	// plot nouns.
+	slugs, raw := taxonomy.Classify(md.Subjects)
+	t.Logf("genres=%v raw=%d of %d", slugs, len(raw), len(md.Subjects))
+	if len(slugs) == 0 {
+		t.Error("no canonical genre came out of real subject data")
 	}
 }
 

@@ -3,6 +3,64 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-16: The genre list is flat, and genres are created on demand
+
+**Decision:** `taxonomy.Canonical` is 44 flat genres with no hierarchy, and a
+`genres` row is inserted the first time a book needs it rather than seeded by a
+migration or a startup pass. `genres.parent_id` from Phase 3 stays unused.
+
+**Rationale:** A hierarchy would make the facet ask which level it is showing,
+and "Epic Fantasy under Fantasy" is a distinction provider data cannot support
+— the same string arrives as `FICTION / Fantasy / Epic`, `Fantasy fiction` and
+`fantasy` depending on where it came from, and none of those place it in a
+tree.
+
+Creating on demand removes the only way the table and the list could disagree.
+A seeding migration would need a new migration every time the list grows, which
+the plan says it will; a startup pass would need a hook in every entry point
+and could still be skipped. Resolving a slug inside the transaction that files
+the book means the table cannot drift, and the facet lists only genres
+something is actually filed under — which is what a browsing UI wants anyway.
+
+**Alternatives Considered:** Two levels with Fiction and Nonfiction on top,
+which doubles the mapping work and makes every facet query choose a level.
+Seeding from a migration, which is the drift above.
+
+**Impact:** `TestEveryAliasPointsAtACanonicalGenre` is the guard the
+on-demand insert needs: a typo in the alias table would otherwise fail at scan
+time rather than in the suite, which is the same reasoning as the policy reason
+coverage test. An admin UI listing all genres reads the Go list, not the table.
+
+---
+
+## 2026-11-16: A BISAC heading is split by the taxonomy, not by each provider
+
+**Decision:** Providers pass subject strings through whole, and
+`taxonomy.Classify` splits a heading on `/` and classifies each part. A heading
+where no part maps is kept whole in `raw_subjects`.
+
+**Rationale:** Found by test. Google Books was splitting its own categories in
+8.2, which left Open Library's `FICTION / Fantasy / Epic` matching nothing at
+all, because it arrives as one string from there and from any client. Splitting
+in one place fixes every provider at once and is the only place that knows what
+a part is worth.
+
+Keeping the unmapped heading whole rather than per part matters for the next
+person: `raw_subjects` holding `FICTION / Fantasy / Epic` says what to add to
+the table, where three rows reading "Fiction", "Fantasy" and "Epic" do not.
+
+**Alternatives Considered:** Splitting in each provider, which is what 8.2 did
+and what missed. Classifying only the last part, which drops the audience
+marker the age suggestion needs out of `JUVENILE FICTION / Fantasy & Magic`.
+
+**Impact:** An explicit noise list drops "Fiction", "General", "In library" and
+the like rather than keeping them, since they say nothing and would attach to
+every row in `raw_subjects`. `raw_subjects.provider` is left NULL: `Resolve`
+takes one provider's subject list wholesale and does not record whose, and
+threading provenance through every field is not worth a column nothing reads.
+
+---
+
 ## 2026-11-16: Fix Match names an edition, and applying one pins and locks
 
 **Decision:** The endpoint is `/api/v1/books/{id}/match` as planned, but it

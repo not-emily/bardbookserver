@@ -177,6 +177,9 @@ func (e Edition) LockedMetadata() metadata.Metadata {
 	if locked.Has(model.FieldASIN) {
 		md.ASIN = e.ASIN
 	}
+	if locked.Has(model.FieldGenres) {
+		md.Subjects = e.Subjects
+	}
 	return md
 }
 
