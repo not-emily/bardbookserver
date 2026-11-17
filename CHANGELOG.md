@@ -5,10 +5,13 @@ until 1.0 the API may still change between minor versions.
 
 [semver]: https://semver.org/
 
-## Unreleased
+## v0.1.0 — 2026-11-17
 
-First release candidate. Everything below is the initial feature set rather
-than a list of changes against anything.
+First release. Everything below is the initial feature set rather than a list
+of changes against anything.
+
+Sub-1.0 deliberately: there is no first-party client yet, so the HTTP API has
+had no consumer to hold it still, and it may change before 1.0.
 
 ### The server
 
