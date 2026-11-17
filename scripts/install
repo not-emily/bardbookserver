@@ -24,25 +24,36 @@ die() {
 [[ $EUID -eq 0 ]] || die "run as root (sudo ./scripts/install)"
 command -v systemctl >/dev/null || die "this installer targets systemd"
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-REPO=$PWD
+# This script runs both from a clone and from an unpacked release archive, so
+# it locates its pieces rather than assuming a layout.
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ -f $HERE/../packaging/systemd/bard.service ]]; then
+	ROOT=$(cd "$HERE/.." && pwd)
+	UNIT_SRC=$ROOT/packaging/systemd/bard.service
+	BUILD=$ROOT/scripts/build
+else
+	ROOT=$HERE
+	UNIT_SRC=$HERE/bard.service
+fi
+[[ -f $UNIT_SRC ]] || die "cannot find bard.service next to this script or in packaging/systemd"
 
 BINARY=${1:-}
+if [[ -z $BINARY && -x $ROOT/bard ]]; then
+	BINARY=$ROOT/bard
+fi
 if [[ -z $BINARY ]]; then
+	[[ -n ${BUILD:-} ]] || die "no binary beside this script; pass one as an argument"
 	command -v go >/dev/null || die "no binary given and go is not installed"
 	say "Building from source..."
 	# Build as the invoking user so the module cache does not end up root-owned.
 	if [[ -n ${SUDO_USER:-} ]]; then
-		sudo -u "$SUDO_USER" ./scripts/build /tmp/bard-install-build
+		sudo -u "$SUDO_USER" "$BUILD" /tmp/bard-install-build
 	else
-		./scripts/build /tmp/bard-install-build
+		"$BUILD" /tmp/bard-install-build
 	fi
 	BINARY=/tmp/bard-install-build
 fi
 [[ -f $BINARY ]] || die "$BINARY does not exist"
-
-UNIT_SRC=$REPO/packaging/systemd/bard.service
-[[ -f $UNIT_SRC ]] || die "$UNIT_SRC is missing"
 
 say "Creating the $SERVICE_USER service account..."
 if ! getent passwd "$SERVICE_USER" >/dev/null; then

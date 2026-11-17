@@ -86,7 +86,18 @@ that actually came through the tunnel can answer it. A verb on the host would
 report on a path no real client takes.
 
 ### 12.4: Documentation
-README, the three deploy recipes, SECURITY, CHANGELOG, LICENSE.
+Done. README, the three deploy recipes plus Docker, backup and restore,
+SECURITY, CHANGELOG, LICENSE.
+
+The README leads with the limitation rather than burying it: there is no
+first-party reading app yet, and someone looking for one tonight should find
+that out in the first paragraph rather than after installing.
+
+**Release archives install themselves.** Writing the install docs exposed that
+a downloaded tarball held only a binary, so following the README meant cloning
+the repo for a unit file. Each archive now carries the binary, the installer
+and the unit, verified by installing from one in a container with no repo
+present.
 
 ## Files to Create
 
@@ -151,6 +162,8 @@ README must cover: what Bard is, supported formats, install, point-at-a-director
       *(12.2: 23MB scratch image; an admin created through the UI survived a
       container restart)*
 - [ ] Following the Cloudflare Tunnel recipe verbatim yields a working remote connection
+      *(12.4: written, and `cloudflared` is not installed on this machine.
+      Needs a Cloudflare account and a domain, so it is the user's to walk)*
 - [~] After following it, two devices on different networks are rate-limited independently
       *(12.3: /diagnostics reports the address rate limiting keys on, and
       eight tests cover the verdicts including both ways `trusted_proxies` can

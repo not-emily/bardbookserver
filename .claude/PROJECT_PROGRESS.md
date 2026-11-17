@@ -8,10 +8,14 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-17
 
 ## Current Focus
-**Phase 12, the last one.** Everything an install needs now moves with it:
-`bard export`, `bard import`, `bard snapshot`, and a nightly snapshot that
-needs no stored schedule. What remains is how Bard gets onto a machine and
-how its operator confirms the deployment is right.
+**The v1 plan is complete.** All twelve phases are done: Bard installs from a
+release archive, runs as a hardened systemd service, moves between machines,
+and tells its operator whether the deployment is right.
+
+What is left is not implementation but exercise against the real world — the
+items marked `[~]` in phase-12.md, which all need something this machine does
+not have: a Cloudflare account and domain, a public IP for an ACME staging
+run, a GitHub remote for CI, and two devices on genuinely different networks.
 
 Three shaping decisions, taken 2026-11-17:
 - **No goreleaser.** Two `go build` lines in a script, verifiable locally.
@@ -25,7 +29,8 @@ Three shaping decisions, taken 2026-11-17:
 - [DONE] Phase 12.2: build and release scripts, systemd unit, installer,
   Docker image, CI and release workflows
 - [DONE] Phase 12.3: `tls: auto` via autocert, and the diagnostics page
-- [NEXT] Phase 12.4: README, the three deploy recipes, SECURITY, CHANGELOG
+- [DONE] Phase 12.4: README, the deploy recipes, backup, SECURITY, CHANGELOG,
+  LICENSE — which completes Phase 12 and the v1 plan
 
 ## Test Media
 Real books live in `../sample-media`, outside the repo, and never go into it.
@@ -103,6 +108,21 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
+- [2026-11-17] Phase 12.4: documentation, completing Phase 12
+  - README, SECURITY, CHANGELOG, MIT LICENSE, `docs/backup.md`, and four
+    deploy recipes: Cloudflare Tunnel (primary), Tailscale, reverse proxy,
+    Docker (secondary, with its absolute-path and NAT caveats)
+  - The README leads with the limitation — no first-party reading app yet —
+    rather than burying it below the feature list
+  - **Writing the install docs exposed a real flaw:** a release tarball held
+    only a binary, so following the README meant cloning the repo for a unit
+    file. Archives now carry the binary, installer and unit, verified by
+    installing from one in a container with no repo present
+  - Every recipe states its `trusted_proxies` value and points at
+    `/diagnostics`; the Tailscale one notes that `tailscale serve` changes the
+    answer, since it introduces a proxy where there was none
+  - The existing MIT LICENSE was left alone; it already carried the right
+    copyright holder
 - [2026-11-17] Phase 12.3: TLS and the diagnostics page
   - `/diagnostics` answers one question — which address rate limiting keys on
     for *this* request — and names the value to set when it is wrong. A page

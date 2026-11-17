@@ -27,7 +27,16 @@ for arch in amd64 arm64; do
 		exit 1
 	fi
 
-	tar -C "$DIST" -czf "$DIST/$name.tar.gz" "$name"
+	# The archive installs itself: downloading a release and then having to
+	# clone the repo for a unit file is a worse first five minutes.
+	stage="$DIST/$name-stage/$name"
+	mkdir -p "$stage"
+	cp "$DIST/$name" "$stage/bard"
+	cp scripts/install "$stage/install"
+	cp packaging/systemd/bard.service "$stage/bard.service"
+	tar -C "$DIST/$name-stage" -czf "$DIST/$name.tar.gz" "$name"
+	rm -rf "$DIST/$name-stage"
+
 	echo "built $name"
 done
 
