@@ -48,6 +48,9 @@ func newHarness(t *testing.T) *harness {
 		Workers:  1,
 		LogLevel: "error",
 		TLS:      config.TLS{Mode: config.TLSOff},
+		Upload: config.Upload{
+			MaxSizeMB: 8, ChunkSizeMB: 1, SessionTTLHr: 48,
+		},
 	}
 
 	ctx := context.Background()

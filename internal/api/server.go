@@ -12,10 +12,12 @@ import (
 	"github.com/not-emily/bardbookserver/internal/auth"
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
+	"github.com/not-emily/bardbookserver/internal/jobs"
 	"github.com/not-emily/bardbookserver/internal/media"
 	"github.com/not-emily/bardbookserver/internal/metadata/provider"
 	"github.com/not-emily/bardbookserver/internal/scan"
 	"github.com/not-emily/bardbookserver/internal/space"
+	"github.com/not-emily/bardbookserver/internal/upload"
 )
 
 const shutdownGrace = 15 * time.Second
@@ -28,6 +30,8 @@ type Server struct {
 	covers    *media.Cache
 	providers *provider.Registry
 	scanner   *scan.Scanner
+	uploads   *upload.Store
+	queue     *jobs.Queue
 	logger    *slog.Logger
 	version   string
 
@@ -48,7 +52,12 @@ func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version
 		providers: providers,
 		// Fix Match writes metadata into the index, which is the scanner's job
 		// whether a file change or a person triggered it.
-		scanner:      scan.NewScanner(database.DB, covers, providers, logger),
+		scanner: scan.NewScanner(database.DB, covers, providers, logger),
+		uploads: upload.NewStore(database.DB, upload.Limits{
+			MaxBytes:   cfg.Upload.MaxBytes(),
+			ChunkBytes: cfg.Upload.ChunkBytes(),
+		}),
+		queue:        jobs.NewQueue(database.DB),
 		logger:       logger,
 		version:      version,
 		loginLimiter: auth.NewLimiter(loginAttempts, loginWindow),
@@ -98,6 +107,10 @@ func (s *Server) handler() http.Handler {
 	authed.HandleFunc("DELETE /api/v1/collections/{id}", s.handleDeleteCollection)
 	authed.HandleFunc("PUT /api/v1/collections/{id}/books/{bookID}", s.handleAddToCollection)
 	authed.HandleFunc("DELETE /api/v1/collections/{id}/books/{bookID}", s.handleRemoveFromCollection)
+	authed.HandleFunc("POST /api/v1/uploads", s.handleCreateUpload)
+	authed.HandleFunc("GET /api/v1/uploads/{id}", s.handleUploadStatus)
+	authed.HandleFunc("PUT /api/v1/uploads/{id}/chunks/{offset}", s.handleUploadChunk)
+	authed.HandleFunc("POST /api/v1/uploads/{id}/finalize", s.handleFinalizeUpload)
 	authed.HandleFunc("GET /api/v1/users/{id}/overrides", s.handleListOverrides)
 	authed.HandleFunc("PUT /api/v1/users/{id}/overrides/{bookID}", s.handleSetOverride)
 	authed.HandleFunc("DELETE /api/v1/users/{id}/overrides/{bookID}", s.handleClearOverride)

@@ -2,29 +2,29 @@
 
 ## Plan Files
 Roadmap: [plan.md](../docs/plan/plan.md)
-Current Phase: [phase-10.md](../docs/plan/phases/phase-10.md)
+Current Phase: [phase-11.md](../docs/plan/phases/phase-11.md)
 Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 9 is complete, so Phases 8 and 9 both landed this session. Age-restricted
-accounts work and are verified leak-free across every read path. Phases 10, 11
-and 12 remain, and 10 is independent of everything shipped.
+Phases 8, 9 and 10 all landed this session, so every phase the admin UI
+consumes is done. Only Phase 11 (the web UI) and Phase 12 (packaging) remain,
+and 11 is now unblocked on all three of its dependencies.
 
 ## Active Tasks
 - [DONE] Phase 8: Metadata providers & taxonomy (all four sub-phases)
 - [DONE] Phase 9: Kids & age gating
-  - ✅ The gate rides on `db.Query`, set by `BookScope.Apply`, so no read path
-    can be assembled without it
-  - ✅ `BookPolicy` with the View/Read/Save split and the full ladder
-  - ✅ Per-user allow/deny overrides, admin-only
-  - ✅ SQL-computed `unlocked`, used for the filter and the sort
-  - ✅ `locked` and `required_age` in list and detail responses
-  - ✅ Leak test across list, search, facets, facet counts, series,
-    collections, sync, history, detail-by-id, file-by-id and cover-by-id
-- [NEXT] Phase 10: Upload — resumable chunked upload, ingest, admin-only
-- [LATER] Phase 11 (admin UI, consumes 8/9/10), 12 (packaging & release)
+- [DONE] Phase 10: Upload
+  - ✅ Resumable sessions: create, PUT chunks at boundary offsets, finalize
+  - ✅ Idempotent resends, missing-chunk reporting, hash check on finalize
+  - ✅ Format decided by sniffing content, not the filename
+  - ✅ `can_upload`, admin-only by default, with `upload_not_allowed`
+  - ✅ Ingest into `Author/Series/## - Title`, then a queued scan
+  - ✅ Abandoned sessions reaped through the Phase 4 job queue
+- [NEXT] Phase 11: Web admin UI — setup wizard, sources, users/devices, Fix
+  Match, the rating queue, genre mapping, job status
+- [LATER] Phase 12: packaging & release
 
 ## Test Media
 Real books live in `../sample-media`, outside the repo, and never go into it.
@@ -98,7 +98,21 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-16] Phase 9: kids and age gating (uncommitted)
+- [2026-11-16] Phase 10: upload (uncommitted)
+  - A chunk is an offset on a boundary, so missing chunks are a set difference
+    and a resend is an INSERT OR IGNORE rather than interval arithmetic
+  - Bytes assemble in `<source>/.bard-ingest`, which the walker already skips,
+    so the final move is a rename rather than a cross-device copy of 700MB
+  - Writing a probe file there is how a read-only source is caught at creation:
+    a mode bit is not enough, since a read-only mount looks writable
+  - Found by test: `Reap` compared SQLite's `datetime('now')` against an
+    RFC3339 cutoff, and a space sorts before `T` — so every session looked
+    expired and a fresh upload would have been deleted immediately. The cutoff
+    is computed in SQL now, so there is one format in play
+  - An uploaded title is untrusted input;
+    `TestADestinationCannotEscapeTheSource` holds that
+  - 430 tests pass, race-clean
+- [2026-11-16] Phase 9: kids and age gating (committed, 3e157c9)
   - The gate lives on the query rather than being passed to twenty call sites,
     so forgetting it is not expressible
   - The age is computed once in Go, not twice: deriving it in SQL would be a
@@ -218,19 +232,31 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 10: upload.
+Phase 11: the web admin UI. Go templates plus vendored htmx, no Node, embedded
+with `embed`.
 
-What is ready: `users.can_upload` exists from Phase 2 and nothing reads it yet,
-so the permission check has its column. The scanner's reconciler is what an
-ingested file has to land in front of, and `scan.EnqueueSource` collapses into
-a scan already queued, so ingest can trigger one without a stampede. Bard never
-renames or moves existing files — upload ingest is the only place it writes
-media, which is the constraint the destination path logic has to respect.
+What is ready: every API it needs exists and is tested — sources
+(`bard source add` has the shape), users and devices, Fix Match over
+`/api/v1/books/{id}/match`, overrides, uploads, and job status in the `jobs`
+table. `suggested_min_age` is populated, so the rating queue has rows to show.
 
-What Phase 10 has to decide: where an uploaded file lands (which source, which
-directory, under what name), and how a resumable chunked upload is tracked
-across requests — a `uploads` table with a session id and received ranges is
-the obvious shape, and it needs a sweep for abandoned ones.
+What Phase 11 has to decide: how the UI authenticates, since every API route is
+behind a device token and a browser is not a device in the same sense. A
+session cookie that wraps a device token is the obvious answer and it has to
+not weaken the token model. Also: unlocking a field has to drop it from
+`locked` in the sidecar too, or the old value keeps outranking the file forever.
+
+## Carried over from Phase 10
+- An EPUB without the spec-required `mimetype` entry is refused on upload,
+  although a scan of the same file on disk indexes it fine. Deliberate — the
+  alternative is accepting any zip as a book — but it is an inconsistency worth
+  remembering if a real file is ever rejected.
+- `upload_sessions` rows are kept after a successful ingest, and only
+  abandoned *open* ones are reaped. They are a small audit trail; Phase 12
+  maintenance could prune them.
+- A single uploaded MP3 becomes a one-part audiobook. Uploading a folder of
+  MP3s as one edition is not expressible: each file would be its own session,
+  and the scanner groups them by directory afterwards.
 
 ## Carried over from Phase 9
 Nothing blocking. Worth knowing:

@@ -31,6 +31,7 @@ const (
 	ReasonExplicitlyDenied Reason = "explicitly_denied"
 	ReasonBelowMinAge      Reason = "below_min_age"
 	ReasonUnrated          Reason = "unrated"
+	ReasonUploadNotAllowed Reason = "upload_not_allowed"
 )
 
 // allReasons exists so a test can assert every reason resolves to a message.
@@ -46,6 +47,7 @@ var allReasons = []Reason{
 	ReasonExplicitlyDenied,
 	ReasonBelowMinAge,
 	ReasonUnrated,
+	ReasonUploadNotAllowed,
 }
 
 const defaultMessage = "Not authorized"
@@ -88,6 +90,8 @@ func Message(r Result) string {
 		return "You are not old enough for this one yet"
 	case ReasonUnrated:
 		return "Nobody has rated this one yet — ask a parent"
+	case ReasonUploadNotAllowed:
+		return "Your account cannot add books"
 	default:
 		return defaultMessage
 	}

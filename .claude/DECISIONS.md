@@ -3,6 +3,69 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-16: A chunk is an offset on a boundary, not an arbitrary range
+
+**Decision:** `PUT /api/v1/uploads/{id}/chunks/{offset}` requires the offset to
+be a multiple of the session's `chunk_bytes`, and every chunk to be exactly
+that length except the last. One row per delivered ordinal in `upload_chunks`.
+
+**Rationale:** The plan asks for chunks at explicit offsets, which this is, but
+accepting *any* offset would mean storing and merging byte ranges — and then
+"what is still missing" is interval arithmetic, and an overlapping resend is a
+correctness question rather than a no-op. On a boundary, an offset is an
+ordinal: missing chunks are a set difference, a resend is an INSERT OR IGNORE
+over a primary key, and a wrong length is caught instead of silently
+truncating.
+
+Assembly is a single file opened with `WriteAt`, so the bytes land in place
+with no reassembly pass over a gigabyte at the end.
+
+**Alternatives Considered:** Arbitrary ranges, as above. Numbering chunks in
+the URL instead of using an offset, which is the same thing with less
+information in the request and a small departure from the plan's wording for no
+gain.
+
+**Impact:** `chunk_bytes` is fixed on the session at creation, so changing the
+configured size cannot corrupt a transfer already in flight. A test asserts
+that offsets of 1, 512, `total_bytes` and -1 are all refused.
+
+---
+
+## 2026-11-16: Bytes assemble inside the source, in a directory the scan skips
+
+**Decision:** A partial upload is written to `<source>/.bard-ingest/<id>.part`
+rather than under the data directory, and moved into the library layout on
+finalize.
+
+**Rationale:** The move has to be a rename rather than a copy. The data
+directory and a media source are routinely on different disks here —
+audiobooks are large and the plan says so — and a cross-device rename fails,
+leaving a 700MB copy as the fallback. Assembling inside the source makes the
+final step atomic and free.
+
+The directory is hidden because `scan.skipName` already skips anything starting
+with a dot, so a transfer in progress is invisible to the walker with no new
+rule to get wrong. Writing a probe file there at session creation is also how a
+read-only source is detected, which the plan wants surfaced before bytes are
+sent rather than at the end of a long transfer: a mode bit is not enough,
+because a read-only mount reports permissions that look fine.
+
+**Alternatives Considered:** Assembling under the data directory, which is
+tidier — nothing incomplete is ever inside the media tree — but pays a
+cross-device copy of the whole file and risks a half-copied file in the tree
+anyway. Assembling in a visible directory and teaching the walker to skip it,
+which is a second place to keep correct.
+
+**Impact:** A rejected or abandoned upload is deleted, so nothing incomplete
+survives in the source. Filing the file into `Author/Series/## - Title` means
+Bard renames a file — which is not what Decision 3 forbids: it protects files
+that already exist, and this one is not part of the library until it lands.
+A title read out of an uploaded file is untrusted, so path separators and
+control characters are stripped and `TestADestinationCannotEscapeTheSource`
+holds that.
+
+---
+
 ## 2026-11-16: The gate rides on the query, so no read path can omit it
 
 **Decision:** `db.Gate` — the account id, whether it is restricted, and its age

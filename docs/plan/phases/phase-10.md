@@ -20,11 +20,19 @@ Add a book from a phone or tablet over cellular without SSH, resumably.
 
 ## Files to Create
 
-- `internal/db/migrations/0010_uploads.sql` — sessions, chunk state
+- `internal/db/migrations/0014_uploads.sql` — sessions, chunk state
+  (`0010` through `0013` were taken by Phases 8 and 9)
 - `internal/api/upload_handlers.go`
 - `internal/upload/session.go`, `internal/upload/ingest.go`
+- `internal/upload/sniff.go` — format from content, not the filename
+- `internal/upload/reaper.go` — the abandoned-session job
 - `internal/policy/upload.go`
 - `internal/upload/session_test.go`
+
+**Chunks arrive at an offset that must be a chunk boundary.** The plan says
+"PUT chunks at offsets" and that is the URL, but an arbitrary offset would mean
+tracking merged byte ranges; a boundary maps to one ordinal, which makes
+"what is missing" a set difference and a resend an INSERT OR IGNORE.
 
 ## Dependencies
 
@@ -48,13 +56,13 @@ The `can_upload` permission exists from the start and defaults to admin-only; op
 
 ## Validation
 
-- [ ] A large file uploads successfully in chunks
-- [ ] Interrupting mid-upload and resuming completes without re-sending delivered chunks
-- [ ] Resending an already-delivered chunk is idempotent
-- [ ] A hash mismatch on finalize rejects the upload and leaves no partial file in the library
-- [ ] A non-admin upload attempt is denied with `upload_not_allowed`
-- [ ] An uploaded EPUB appears in the library with metadata after ingest
-- [ ] A file whose contents do not match its declared format is rejected
-- [ ] Exceeding the configured max size is rejected at session creation
-- [ ] Targeting a read-only source fails with a clear error before bytes are sent
-- [ ] Abandoned sessions are reaped and their partial data removed
+- [x] A large file uploads successfully in chunks
+- [x] Interrupting mid-upload and resuming completes without re-sending delivered chunks
+- [x] Resending an already-delivered chunk is idempotent
+- [x] A hash mismatch on finalize rejects the upload and leaves no partial file in the library
+- [x] A non-admin upload attempt is denied with `upload_not_allowed`
+- [x] An uploaded EPUB appears in the library with metadata after ingest
+- [x] A file whose contents do not match its declared format is rejected
+- [x] Exceeding the configured max size is rejected at session creation
+- [x] Targeting a read-only source fails with a clear error before bytes are sent
+- [x] Abandoned sessions are reaped and their partial data removed

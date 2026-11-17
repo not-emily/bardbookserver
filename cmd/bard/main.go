@@ -18,6 +18,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/media"
 	"github.com/not-emily/bardbookserver/internal/metadata/provider"
 	"github.com/not-emily/bardbookserver/internal/scan"
+	"github.com/not-emily/bardbookserver/internal/upload"
 )
 
 // version is overridden at build time via -ldflags.
@@ -121,6 +122,15 @@ func cmdServe(args []string) error {
 		logger.Info("metadata providers enabled", "providers", providers.Names())
 	}
 	scan.NewScanner(database.DB, media.NewCache(cfg.CoverCacheDir()), providers, logger).Register(pool)
+
+	uploads := upload.NewStore(database.DB, upload.Limits{
+		MaxBytes:   cfg.Upload.MaxBytes(),
+		ChunkBytes: cfg.Upload.ChunkBytes(),
+	})
+	upload.NewReaper(uploads, cfg.Upload.SessionTTL(), logger).Register(pool)
+	if _, err := upload.Enqueue(ctx, queue); err != nil {
+		logger.Error("queue the upload reaper", "error", err)
+	}
 
 	var workers sync.WaitGroup
 	workers.Add(1)

@@ -40,8 +40,23 @@ type Config struct {
 	LogLevel       string   `yaml:"log_level"`
 	TLS            TLS      `yaml:"tls"`
 	Metadata       Metadata `yaml:"metadata"`
+	Upload         Upload   `yaml:"upload"`
 
 	trustedPrefixes []netip.Prefix
+}
+
+type Upload struct {
+	MaxSizeMB    int `yaml:"max_size_mb"`
+	ChunkSizeMB  int `yaml:"chunk_size_mb"`
+	SessionTTLHr int `yaml:"session_ttl_hours"`
+}
+
+func (u Upload) MaxBytes() int64 { return int64(u.MaxSizeMB) << 20 }
+
+func (u Upload) ChunkBytes() int64 { return int64(u.ChunkSizeMB) << 20 }
+
+func (u Upload) SessionTTL() time.Duration {
+	return time.Duration(u.SessionTTLHr) * time.Hour
 }
 
 // Metadata configures the online providers, every one off until named here: a
@@ -77,6 +92,11 @@ func defaults() Config {
 		LogLevel:       "info",
 		TLS:            TLS{Mode: TLSOff},
 		Metadata:       Metadata{TimeoutSeconds: 10},
+		Upload: Upload{
+			MaxSizeMB:    4096,
+			ChunkSizeMB:  8,
+			SessionTTLHr: 48,
+		},
 	}
 }
 
@@ -172,6 +192,17 @@ func (c *Config) validate() error {
 	}
 	if c.Metadata.TimeoutSeconds < 1 {
 		return fmt.Errorf("metadata.timeout_seconds: %d must be at least 1", c.Metadata.TimeoutSeconds)
+	}
+
+	if c.Upload.MaxSizeMB < 1 {
+		return fmt.Errorf("upload.max_size_mb: %d must be at least 1", c.Upload.MaxSizeMB)
+	}
+	if c.Upload.ChunkSizeMB < 1 || c.Upload.ChunkSizeMB > c.Upload.MaxSizeMB {
+		return fmt.Errorf("upload.chunk_size_mb: %d must be between 1 and max_size_mb",
+			c.Upload.ChunkSizeMB)
+	}
+	if c.Upload.SessionTTLHr < 1 {
+		return fmt.Errorf("upload.session_ttl_hours: %d must be at least 1", c.Upload.SessionTTLHr)
 	}
 
 	prefixes, err := parseProxies(c.TrustedProxies)
