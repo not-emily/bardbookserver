@@ -1,36 +1,46 @@
 # Project Progress - bardbookserver
 
 ## Plan Files
-Roadmap: [plan.md](../docs/plan/plan.md)
-Current Phase: [phase-12.md](../docs/plan/phases/phase-12.md)
+Roadmap: None
+Current Phase: None
 Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
+
+The completed v1 plan is archived at
+[docs/plan/_archived/v1-initial-build/](../docs/plan/_archived/v1-initial-build/).
+Comments and commit messages saying `v1 phase N` refer to its phase files.
 
 Last Updated: 2026-11-17
 
 ## Current Focus
-**The v1 plan is complete.** All twelve phases are done: Bard installs from a
-release archive, runs as a hardened systemd service, moves between machines,
-and tells its operator whether the deployment is right.
+**The v1 plan is complete — all twelve phases.** Bard installs from a release
+archive, runs as a hardened systemd service, moves between machines, and tells
+its operator whether the deployment is right.
 
-What is left is not implementation but exercise against the real world — the
-items marked `[~]` in phase-12.md, which all need something this machine does
-not have: a Cloudflare account and domain, a public IP for an ACME staging
-run, a GitHub remote for CI, and two devices on genuinely different networks.
+**Next work is the native apps, which are a separate project.** Decided
+2026-11-17: the server is done enough to build a client against, and a web
+reading client was explicitly declined rather than deferred (see Open
+Questions). Nothing further is queued in this repository.
 
-Three shaping decisions, taken 2026-11-17:
+Three shaping decisions from Phase 12, taken 2026-11-17:
 - **No goreleaser.** Two `go build` lines in a script, verifiable locally.
 - **systemd first, Docker second.** The static binary is the real install.
 - **No Cloudflare credential ever touches Bard.** A diagnostics page proving
   `trusted_proxies` is right replaces the tunnel wrapper that was considered.
 
 ## Active Tasks
-- [DONE] Phases 8, 9, 10, 11 (all four sub-phases)
-- [DONE] Phase 12.1: snapshots, export and import
-- [DONE] Phase 12.2: build and release scripts, systemd unit, installer,
-  Docker image, CI and release workflows
-- [DONE] Phase 12.3: `tls: auto` via autocert, and the diagnostics page
-- [DONE] Phase 12.4: README, the deploy recipes, backup, SECURITY, CHANGELOG,
-  LICENSE — which completes Phase 12 and the v1 plan
+Nothing in progress. Every phase is complete and recorded below.
+
+Carried forward, each needing something this machine does not have rather than
+any more code — these are the `[~]` items in the archived
+[phase-12.md](../docs/plan/_archived/v1-initial-build/phases/phase-12.md):
+- [NEXT] Walk the Cloudflare Tunnel recipe end to end. Needs a Cloudflare
+  account and a domain; `cloudflared` is not installed here
+- [NEXT] Confirm two devices on genuinely different networks are rate-limited
+  independently, which `/diagnostics` is built to show
+- [NEXT] Obtain a staging certificate with `tls: auto`. Needs a public domain
+  with inbound port 80; `tls.acme_directory` exists for exactly this
+- [NEXT] Push to a GitHub remote so CI and the release workflow actually run,
+  and tag a release to confirm the artefacts publish
 
 ## Test Media
 Real books live in `../sample-media`, outside the repo, and never go into it.
@@ -43,6 +53,23 @@ verified against.
 
 ## Open Questions/Blockers
 Nothing is blocked. These are known limitations carried forward.
+
+- **The web surface is admin-only, and there is no way to browse or read in a
+  browser.** `requireWebAuth` is `requireAuth(requireAdmin(...))`
+  (`internal/api/web_handlers.go:232`), so every page is admin-gated, and the
+  page titled "Library" is six counts — there is no `/books` listing, no book
+  detail page, no reader and no player. This is the Phase 11 boundary
+  (*"This is not a reading UI; reading lives in the apps"*) plus the plan's
+  out-of-scope line putting client rendering in the apps, so it is deliberate
+  rather than unfinished. **Asked and decided 2026-11-17: not building a web
+  browse view; going straight to the native apps.** Worth knowing that the
+  consequence is a server whose only intended client does not exist yet, which
+  the README states in its first section.
+- **Letting non-admins into the browser is bigger than it looks.** The data
+  side is ready — the age gate and private spaces are enforced in
+  `internal/policy` and the query scopes the API already composes through —
+  but every page would have to stop being admin-only and start composing
+  through those same scopes.
 
 - **Audnexus cannot enrich the sample audiobooks.** It has no title search, so
   it needs an ASIN, and both sample M4Bs are from Libro.fm and carry none.
