@@ -1,0 +1,64 @@
+{{define "content"}}
+<h1>Diagnostics</h1>
+
+<p class="muted">
+  What Bard makes of <em>this</em> request. Load this page the way a client
+  will reach it, not from the server itself, or it has nothing to tell you.
+</p>
+
+<div class="verdict verdict-{{.Diagnosis.Level}}">
+  <h2>{{.Diagnosis.Headline}}</h2>
+  <p>{{.Diagnosis.Detail}}</p>
+</div>
+
+<h2>This request</h2>
+<dl class="counts">
+  <dt>Arrived from</dt>
+  <dd>{{.Diagnosis.Peer}}{{if .Diagnosis.PeerTrusted}} <span class="muted">(trusted)</span>{{end}}</dd>
+
+  <dt>X-Forwarded-For</dt>
+  <dd>
+    {{if .Diagnosis.Forwarded}}
+      {{range $i, $hop := .Diagnosis.Forwarded}}{{if $i}}, {{end}}{{$hop}}{{end}}
+    {{else}}<span class="muted">absent</span>{{end}}
+  </dd>
+
+  <dt>X-Forwarded-Proto</dt>
+  <dd>{{if .Diagnosis.ForwardedProto}}{{.Diagnosis.ForwardedProto}}{{else}}<span class="muted">absent</span>{{end}}</dd>
+
+  <dt>Rate limiting keys on</dt>
+  <dd><strong>{{.Diagnosis.Client}}</strong></dd>
+
+  <dt>Resolved scheme</dt>
+  <dd>{{.Diagnosis.Scheme}}</dd>
+
+  <dt>Secure context</dt>
+  <dd>
+    {{if .Diagnosis.SecureContext}}yes
+    {{else}}no &mdash; <span class="muted">uploads need HTTPS or localhost, because the browser withholds crypto.subtle otherwise</span>
+    {{end}}
+  </dd>
+</dl>
+
+<h2>Configuration</h2>
+<dl class="counts">
+  <dt>trusted_proxies</dt>
+  <dd>
+    {{if .Diagnosis.TrustedProxies}}
+      {{range $i, $p := .Diagnosis.TrustedProxies}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}
+    {{else}}<span class="muted">empty</span>{{end}}
+  </dd>
+
+  <dt>Listening on</dt>
+  <dd>{{.BindAddr}}</dd>
+
+  <dt>TLS mode</dt>
+  <dd>{{.TLSMode}}</dd>
+</dl>
+
+<p class="muted">
+  Changing <code>trusted_proxies</code> means editing the config file and
+  restarting; it is deliberately not editable here, since a form that rewrites
+  the file would discard its comments.
+</p>
+{{end}}

@@ -86,13 +86,22 @@ func (m Metadata) Timeout() time.Duration {
 	return time.Duration(m.TimeoutSeconds) * time.Second
 }
 
-// TLS is parsed and validated here but not wired until v1 phase 12; Bard runs
-// behind a tunnel or proxy in every other deployment recipe.
+// TLS matters only for the direct port-forward case; every other deployment
+// recipe terminates TLS in front of Bard.
 type TLS struct {
 	Mode     string   `yaml:"mode"`
 	CertFile string   `yaml:"cert_file"`
 	KeyFile  string   `yaml:"key_file"`
 	Domains  []string `yaml:"domains"`
+
+	// ChallengeAddr answers ACME HTTP-01. It is separate from the main port
+	// because a CA only looks on 80 or 443, and Bard's default is neither.
+	ChallengeAddr string `yaml:"challenge_addr"`
+
+	// ACMEDirectory points at a CA other than Let's Encrypt production, which
+	// is how a deployment is rehearsed against staging without spending a
+	// rate limit that takes a week to recover.
+	ACMEDirectory string `yaml:"acme_directory"`
 }
 
 func defaults() Config {
@@ -103,7 +112,7 @@ func defaults() Config {
 		TrustedProxies: nil,
 		Workers:        2,
 		LogLevel:       "info",
-		TLS:            TLS{Mode: TLSOff},
+		TLS:            TLS{Mode: TLSOff, ChallengeAddr: ":80"},
 		Metadata:       Metadata{TimeoutSeconds: 10},
 		Upload: Upload{
 			MaxSizeMB:    4096,
@@ -189,6 +198,9 @@ func (c *Config) validate() error {
 	case TLSAuto:
 		if len(c.TLS.Domains) == 0 {
 			return errors.New("tls.domains: at least one domain is required when tls.mode is auto")
+		}
+		if strings.TrimSpace(c.TLS.ChallengeAddr) == "" {
+			return errors.New("tls.challenge_addr: required when tls.mode is auto, since a CA answers HTTP-01 on port 80")
 		}
 	case TLSFiles:
 		if c.TLS.CertFile == "" || c.TLS.KeyFile == "" {

@@ -24,7 +24,7 @@ Three shaping decisions, taken 2026-11-17:
 - [DONE] Phase 12.1: snapshots, export and import
 - [DONE] Phase 12.2: build and release scripts, systemd unit, installer,
   Docker image, CI and release workflows
-- [NEXT] Phase 12.3: `tls: auto` via autocert, and the diagnostics page
+- [DONE] Phase 12.3: `tls: auto` via autocert, and the diagnostics page
 - [NEXT] Phase 12.4: README, the three deploy recipes, SECURITY, CHANGELOG
 
 ## Test Media
@@ -103,6 +103,21 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
+- [2026-11-17] Phase 12.3: TLS and the diagnostics page
+  - `/diagnostics` answers one question — which address rate limiting keys on
+    for *this* request — and names the value to set when it is wrong. A page
+    rather than a CLI verb, because only a request that came through the
+    tunnel can answer it
+  - Eight tests cover the verdicts, including both directions
+    `trusted_proxies` fails: a proxy in front with nothing trusted, and a
+    trusted range so wide it swallows the clients
+  - `tls: auto` needs a second listener, since a CA answers TLS-ALPN-01 on 443
+    or HTTP-01 on 80 and Bard's default port is neither. `tls.acme_directory`
+    makes a staging rehearsal possible without burning a production rate limit
+  - autocert's fallback redirect goes to port 443, which is wrong whenever
+    Bard serves TLS elsewhere, so the redirect is Bard's own
+  - One new module, `golang.org/x/net`, which autocert needs for IDNA. Still
+    no cgo
 - [2026-11-17] Phase 12.2: build, install and CI
   - `scripts/build`, `scripts/release`, `scripts/install`, `scripts/version`,
     following the hub-core pattern of plain shell over goreleaser

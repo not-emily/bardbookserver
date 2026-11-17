@@ -82,6 +82,25 @@ button:hover { background: #46391f; }
 
 .muted { color: #6b6559; font-size: 0.9rem; }
 
+/* A verdict is read before anything else on the page, so the colour carries
+   the whole message for someone who only glances. */
+.verdict {
+  padding: 0.8rem 1rem;
+  margin: 1rem 0;
+  border-left: 4px solid var(--rule);
+  background: #f3efe5;
+}
+
+.verdict h2 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+
+.verdict p { margin: 0; }
+
+.verdict-ok { border-left-color: #3f6b3a; }
+
+.verdict-warn { border-left-color: #8a6d1f; }
+
+.verdict-bad { border-left-color: var(--bad); background: #fdf1ef; }
+
 dl.counts {
   display: grid;
   grid-template-columns: auto auto;

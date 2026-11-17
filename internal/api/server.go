@@ -169,6 +169,7 @@ func (s *Server) handler() http.Handler {
 	pages.HandleFunc("GET /books/{id}/match", s.handleBookMatchPage)
 	pages.HandleFunc("POST /books/{id}/match", s.handleBookMatchApply)
 	pages.HandleFunc("GET /upload", s.handleUploadPage)
+	pages.HandleFunc("GET /diagnostics", s.handleDiagnosticsPage)
 	mux.Handle("/", s.requireWebAuth(pages))
 
 	resolver := proxyResolver{trusted: s.cfg.TrustedPrefixes()}
@@ -195,7 +196,7 @@ func (s *Server) Run(ctx context.Context) error {
 			"addr", srv.Addr,
 			"tls", s.cfg.TLS.Mode,
 			"trusted_proxies", len(s.cfg.TrustedPrefixes()))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := s.listen(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 			return
 		}

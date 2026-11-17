@@ -68,7 +68,22 @@ gone before Bard sees it. Verified: a request to the container logged
 `client=172.17.0.1`.
 
 ### 12.3: TLS and diagnostics
-`tls: auto` via autocert, and the `trusted_proxies` diagnostics page.
+Done. `tls: auto` via autocert, and the diagnostics page.
+
+**An ACME challenge can only be answered where the CA looks for it** —
+TLS-ALPN-01 on 443 or HTTP-01 on 80 — and Bard's default port is neither. So
+`tls.challenge_addr` is a separate listener, and losing it is logged rather
+than left to a renewal that silently fails months later. `tls.acme_directory`
+exists so a deployment can be rehearsed against staging without spending a
+production rate limit that takes a week to recover.
+
+autocert's own non-challenge fallback redirects to port 443, which is the
+wrong place whenever Bard serves TLS anywhere else, so the redirect is Bard's.
+
+**The diagnostics page is a page, not a CLI verb**, because the question it
+answers is "what did the deployment do to this request" — and only a request
+that actually came through the tunnel can answer it. A verb on the host would
+report on a path no real client takes.
 
 ### 12.4: Documentation
 README, the three deploy recipes, SECURITY, CHANGELOG, LICENSE.
@@ -136,8 +151,16 @@ README must cover: what Bard is, supported formats, install, point-at-a-director
       *(12.2: 23MB scratch image; an admin created through the UI survived a
       container restart)*
 - [ ] Following the Cloudflare Tunnel recipe verbatim yields a working remote connection
-- [ ] After following it, two devices on different networks are rate-limited independently
-- [ ] `tls: auto` obtains a certificate against the Let's Encrypt staging environment
+- [~] After following it, two devices on different networks are rate-limited independently
+      *(12.3: /diagnostics reports the address rate limiting keys on, and
+      eight tests cover the verdicts including both ways `trusted_proxies` can
+      be wrong. Two real networks still need the tunnel standing up)*
+- [~] `tls: auto` obtains a certificate against the Let's Encrypt staging environment
+      *(12.3: the wiring is verified — autocert serves the challenge path,
+      enforces its host policy, and a handshake with SNI reaches the ACME
+      client at the configured directory. A real staging certificate needs a
+      public domain with inbound port 80, which this machine does not have;
+      `tls.acme_directory` is there so it can be done on one that does)*
 - [x] A nightly snapshot restores into a working server
       *(12.1: the boot snapshot of a restored install, copied to `bard.db`,
       served the library and accepted the original password)*

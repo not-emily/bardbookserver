@@ -44,6 +44,8 @@ type pageData struct {
 	Aliases  []aliasRow
 	Genres   []taxonomy.Genre
 
+	Diagnosis diagnosis
+
 	BookID     int64
 	EditionID  int64
 	Editions   []editionChoice
