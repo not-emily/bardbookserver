@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/not-emily/bardbookserver/internal/api"
+	"github.com/not-emily/bardbookserver/internal/backup"
 	"github.com/not-emily/bardbookserver/internal/config"
 	"github.com/not-emily/bardbookserver/internal/db"
 	"github.com/not-emily/bardbookserver/internal/jobs"
@@ -47,7 +48,11 @@ func run(args []string) error {
 	case "user":
 		return cmdUser(args[1:])
 	case "export":
-		return notImplemented("export", 12)
+		return cmdExport(args[1:])
+	case "import":
+		return cmdImport(args[1:])
+	case "snapshot":
+		return cmdSnapshot(args[1:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -69,14 +74,12 @@ Usage:
   bard source add|list         Manage directory roots
   bard user add|passwd|pin|list
                                Manage accounts
-  bard export                  Export database and caches
+  bard export [--out PATH]     Write a portable archive of this install
+  bard import [--force] FILE   Restore an archive into the data directory
+  bard snapshot                Take a database snapshot now
   bard version                 Print the version
 
 `)
-}
-
-func notImplemented(name string, phase int) error {
-	return fmt.Errorf("%s is not implemented yet (v1 phase %d)", name, phase)
 }
 
 func cmdServe(args []string) error {
@@ -140,6 +143,17 @@ func cmdServe(args []string) error {
 			logger.Error("job pool stopped", "error", err)
 		}
 	}()
+
+	if cfg.Backup.Enabled {
+		snapshots := backup.NewSnapshotter(database, cfg.SnapshotDir(),
+			cfg.Backup.Interval(), cfg.Backup.Keep, logger)
+		snapshots.Register(pool)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			snapshots.Run(workCtx, queue)
+		}()
+	}
 
 	server, err := api.NewServer(cfg, database, logger, version)
 	if err != nil {

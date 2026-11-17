@@ -41,8 +41,21 @@ type Config struct {
 	TLS            TLS      `yaml:"tls"`
 	Metadata       Metadata `yaml:"metadata"`
 	Upload         Upload   `yaml:"upload"`
+	Backup         Backup   `yaml:"backup"`
 
 	trustedPrefixes []netip.Prefix
+}
+
+// Backup is on by default: the database holds every rating, bookmark and
+// manual correction, and none of it can be re-derived from the media.
+type Backup struct {
+	Enabled       bool `yaml:"enabled"`
+	IntervalHours int  `yaml:"interval_hours"`
+	Keep          int  `yaml:"keep"`
+}
+
+func (b Backup) Interval() time.Duration {
+	return time.Duration(b.IntervalHours) * time.Hour
 }
 
 type Upload struct {
@@ -97,6 +110,7 @@ func defaults() Config {
 			ChunkSizeMB:  8,
 			SessionTTLHr: 48,
 		},
+		Backup: Backup{Enabled: true, IntervalHours: 24, Keep: 7},
 	}
 }
 
@@ -205,6 +219,15 @@ func (c *Config) validate() error {
 		return fmt.Errorf("upload.session_ttl_hours: %d must be at least 1", c.Upload.SessionTTLHr)
 	}
 
+	if c.Backup.Enabled {
+		if c.Backup.IntervalHours < 1 {
+			return fmt.Errorf("backup.interval_hours: %d must be at least 1", c.Backup.IntervalHours)
+		}
+		if c.Backup.Keep < 1 {
+			return fmt.Errorf("backup.keep: %d must be at least 1", c.Backup.Keep)
+		}
+	}
+
 	prefixes, err := parseProxies(c.TrustedProxies)
 	if err != nil {
 		return err
@@ -245,5 +268,7 @@ func (c *Config) TrustedPrefixes() []netip.Prefix { return c.trustedPrefixes }
 func (c *Config) DatabasePath() string { return filepath.Join(c.DataDir, "bard.db") }
 
 func (c *Config) CoverCacheDir() string { return filepath.Join(c.DataDir, "covers") }
+
+func (c *Config) SnapshotDir() string { return filepath.Join(c.DataDir, "snapshots") }
 
 func (c *Config) ListenAddr() string { return fmt.Sprintf("%s:%d", c.BindAddr, c.Port) }

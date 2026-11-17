@@ -8,19 +8,24 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-17
 
 ## Current Focus
-**Phase 11 is complete, so only Phase 12 remains.** Bard can be installed,
-configured, filled and corrected entirely from a browser: setup wizard,
-sources, accounts, devices, uploads, Fix Match, the rating queue and genre
-mapping. No Node, no vendored JavaScript, no build step beyond `go build`.
+**Phase 12, the last one.** Everything an install needs now moves with it:
+`bard export`, `bard import`, `bard snapshot`, and a nightly snapshot that
+needs no stored schedule. What remains is how Bard gets onto a machine and
+how its operator confirms the deployment is right.
+
+Three shaping decisions, taken 2026-11-17:
+- **No goreleaser.** Two `go build` lines in a script, verifiable locally.
+- **systemd first, Docker second.** The static binary is the real install.
+- **No Cloudflare credential ever touches Bard.** A diagnostics page proving
+  `trusted_proxies` is right replaces the tunnel wrapper that was considered.
 
 ## Active Tasks
 - [DONE] Phases 8, 9, 10, 11 (all four sub-phases)
-- [NEXT] Phase 12: packaging & release — goreleaser, static amd64/arm64
-  binaries, systemd unit, Docker image, the three deploy recipes, and
-  backup/export
-- Phase 12's export has to cover what is authored rather than derived:
-  `genre_aliases`, `book_overrides`, `provider_matches`, PINs, and every
-  account's progress, ratings, shelves and annotations
+- [DONE] Phase 12.1: snapshots, export and import
+- [NEXT] Phase 12.2: `scripts/build` and `scripts/release`, the systemd unit,
+  the install script, and the CI and release workflows
+- [NEXT] Phase 12.3: `tls: auto` via autocert, and the diagnostics page
+- [NEXT] Phase 12.4: README, the three deploy recipes, SECURITY, CHANGELOG
 
 ## Test Media
 Real books live in `../sample-media`, outside the repo, and never go into it.
@@ -98,6 +103,24 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
+- [2026-11-17] Phase 12.1: snapshots, export and import
+  - `bard export` writes a tar.gz of a `VACUUM INTO` snapshot plus the cover
+    cache, and deliberately no media; `bard import` refuses a populated data
+    directory unless forced
+  - A nightly snapshot reads its due time off the snapshot directory listing,
+    so a failed night stays due with no state to reset. It polls on a ticker
+    because the dedupe index covers `running`, which means a job cannot queue
+    its own successor
+  - **The cover cache shards by hash prefix, which broke both halves.** The
+    export read only the top level and carried zero covers; the restore used
+    `path.Base` and would have collided every book's `full.jpg`. Caught by
+    exporting the real dev install rather than by a test
+  - Snapshots are chmod 0600 — SQLite creates them by umask, and a snapshot is
+    a whole copy of the password hashes and device tokens
+  - Verified end to end: exported 6 books / 1 account / 14 covers, restored
+    into an empty directory, and the restored server accepted the original
+    password, served covers from the restored cache, and still had the
+    hand-set age rating
 - [2026-11-17] Phase 11.4b: Fix Match and the upload form (uncommitted)
   - A match page showing ranked candidates including the ones the automatic
     matcher refused, with a search box for looking up something else entirely
