@@ -13,9 +13,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # shellcheck source=scripts/version
 source scripts/version
 
-# Overridable because the staged files have to be executable, and a hardened
-# host may mount /tmp noexec.
-REMOTE_DIR=${BARD_DEPLOY_DIR:-/tmp/bard-deploy}
+# Staging only: the installer copies out of here to /usr/local/bin. /var/tmp
+# rather than /tmp because a plain deploy leaves these for you to install by
+# hand later, and /tmp is cleared on reboot and is often tmpfs. Overridable
+# because the staged files must be executable and a host may mount it noexec.
+REMOTE_DIR=${BARD_DEPLOY_DIR:-/var/tmp/bard-deploy}
 
 say() { printf '\033[0;32m%s\033[0m\n' "$*"; }
 step() { printf '\033[0;34m%s\033[0m\n' "$*"; }
