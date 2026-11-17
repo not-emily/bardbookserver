@@ -141,7 +141,13 @@ func cmdServe(args []string) error {
 		}
 	}()
 
-	err = api.NewServer(cfg, database, logger, version).Run(ctx)
+	server, err := api.NewServer(cfg, database, logger, version)
+	if err != nil {
+		stopWorkers()
+		return err
+	}
+
+	err = server.Run(ctx)
 	stopWorkers()
 	workers.Wait()
 	return err

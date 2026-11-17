@@ -3,6 +3,48 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-16: A browser is a device, and cookie auth is the only thing CSRF guards
+
+**Decision:** The admin UI signs in by form and receives its device token in an
+HttpOnly `bard_session` cookie. `requireAuth` reads the cookie as a second
+source after the Authorization header, and applies one rule: **a request that
+authenticated by cookie must echo a CSRF token on any non-GET; a request that
+authenticated by Bearer never needs one.** The token is a per-device random in
+`devices.csrf_token`.
+
+**Rationale:** Plex's model is a client-generated `X-Plex-Client-Identifier`
+plus a per-device token, with the IP and browser string recorded for display
+only — not identity. Bard is already stronger, since the token is
+server-generated and the device row is keyed on its hash. What does not
+transfer is the transport: Plex Web is a single-page app, so every request is
+XHR and can set a header. This UI is Go templates, and **a page navigation
+cannot set an Authorization header** — so the token has to be in a cookie.
+
+Making the browser a device rather than a separate session keeps one
+revocation surface. A browser appears in the authorized-devices list, and
+revoking it signs the browser out on the next request, because the token lookup
+already hits the database every time.
+
+The CSRF rule is phrased on the *source of authentication* rather than the
+route, which is what keeps the apps untouched: they send a header, so nothing
+changes for them, and no new route can forget the check.
+
+**Alternatives Considered:** A token in `localStorage` with a JS client, which
+has no CSRF problem at all but means page loads are unauthenticated — so it
+needs a SPA, contradicting "no Node, no build step". A separate `sessions`
+table, which is a second auth mechanism and a second revocation surface, and
+leaves the devices screen either incomplete or merging two tables.
+
+**Impact:** `Secure` is set only where the client actually used TLS, which
+behind a tunnel is known from `X-Forwarded-Proto` and only from a *trusted*
+proxy — `trusted_proxies` is load-bearing for a third time. `SameSite=Lax`,
+since `Strict` would break an inbound link to the UI and Lax already blocks
+cross-site POST. An empty stored token never matches, so a device issued before
+this existed cannot be driven by a cookie. Verified by neutering the check and
+watching the write tests fail.
+
+---
+
 ## 2026-11-16: A chunk is an offset on a boundary, not an arbitrary range
 
 **Decision:** `PUT /api/v1/uploads/{id}/chunks/{offset}` requires the offset to

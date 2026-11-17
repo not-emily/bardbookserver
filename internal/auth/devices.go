@@ -11,7 +11,7 @@ import (
 )
 
 const deviceColumns = `id, owner_id, active_user_id, name,
-	COALESCE(last_seen_ip, ''), last_seen_at, created_at`
+	COALESCE(last_seen_ip, ''), last_seen_at, created_at, csrf_token`
 
 func scanDevice(row interface{ Scan(...any) error }) (*model.Device, error) {
 	var (
@@ -20,7 +20,7 @@ func scanDevice(row interface{ Scan(...any) error }) (*model.Device, error) {
 		createdAt  string
 	)
 	err := row.Scan(&d.ID, &d.OwnerID, &d.ActiveUserID, &d.Name,
-		&d.LastSeenIP, &lastSeenAt, &createdAt)
+		&d.LastSeenIP, &lastSeenAt, &createdAt, &d.CSRFToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -50,9 +50,16 @@ func (s *Store) CreateDevice(ctx context.Context, ownerID int64, name string) (*
 		name = "Unnamed device"
 	}
 
+	// Issued for every device: the transport it will authenticate over is not
+	// knowable here.
+	csrf, _, err := NewToken()
+	if err != nil {
+		return nil, "", err
+	}
+
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO devices (token_hash, owner_id, active_user_id, name)
-		VALUES (?, ?, ?, ?)`, hash, ownerID, ownerID, name)
+		INSERT INTO devices (token_hash, owner_id, active_user_id, name, csrf_token)
+		VALUES (?, ?, ?, ?, ?)`, hash, ownerID, ownerID, name, csrf)
 	if err != nil {
 		return nil, "", fmt.Errorf("insert device: %w", err)
 	}

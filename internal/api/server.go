@@ -18,6 +18,7 @@ import (
 	"github.com/not-emily/bardbookserver/internal/scan"
 	"github.com/not-emily/bardbookserver/internal/space"
 	"github.com/not-emily/bardbookserver/internal/upload"
+	"github.com/not-emily/bardbookserver/internal/web"
 )
 
 const shutdownGrace = 15 * time.Second
@@ -32,6 +33,8 @@ type Server struct {
 	scanner   *scan.Scanner
 	uploads   *upload.Store
 	queue     *jobs.Queue
+	templates *web.Templates
+	static    http.Handler
 	logger    *slog.Logger
 	version   string
 
@@ -39,9 +42,18 @@ type Server struct {
 	pinLimiter   *auth.Limiter
 }
 
-func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version string) *Server {
+func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version string) (*Server, error) {
 	covers := media.NewCache(cfg.CoverCacheDir())
 	providers := provider.New(cfg.Metadata, database.DB, logger)
+
+	templates, err := web.Parse()
+	if err != nil {
+		return nil, err
+	}
+	static, err := web.Static()
+	if err != nil {
+		return nil, err
+	}
 
 	return &Server{
 		cfg:       cfg,
@@ -58,11 +70,13 @@ func NewServer(cfg *config.Config, database *db.DB, logger *slog.Logger, version
 			ChunkBytes: cfg.Upload.ChunkBytes(),
 		}),
 		queue:        jobs.NewQueue(database.DB),
+		templates:    templates,
+		static:       static,
 		logger:       logger,
 		version:      version,
 		loginLimiter: auth.NewLimiter(loginAttempts, loginWindow),
 		pinLimiter:   auth.NewLimiter(pinAttempts, pinWindow),
-	}
+	}, nil
 }
 
 func (s *Server) handler() http.Handler {
@@ -121,6 +135,17 @@ func (s *Server) handler() http.Handler {
 	authed.HandleFunc("POST /api/v1/editions/{id}/group", s.handleMergeEdition)
 	authed.HandleFunc("DELETE /api/v1/editions/{id}/group", s.handleSplitEdition)
 	mux.Handle("/api/v1/", s.requireAuth(authed))
+
+	mux.Handle("GET /static/", s.static)
+	mux.HandleFunc("GET /login", s.handleLoginPage)
+	mux.HandleFunc("POST /login", s.handleWebLogin)
+	mux.HandleFunc("GET /setup", s.handleSetupPage)
+	mux.HandleFunc("POST /setup", s.handleSetupSubmit)
+
+	pages := http.NewServeMux()
+	pages.HandleFunc("GET /{$}", s.handleDashboard)
+	pages.HandleFunc("POST /logout", s.handleWebLogout)
+	mux.Handle("/", s.requireWebAuth(pages))
 
 	resolver := proxyResolver{trusted: s.cfg.TrustedPrefixes()}
 

@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Welcome to Bard</h1>
+<p>No accounts exist yet, so this is the only page available. Create the
+first administrator to continue.</p>
+
+<form method="post" action="/setup" class="stack">
+  <label>
+    Username
+    <input type="text" name="username" autocomplete="username" autofocus required>
+  </label>
+  <label>
+    Display name
+    <input type="text" name="display_name" autocomplete="name">
+  </label>
+  <label>
+    Password
+    <input type="password" name="password" autocomplete="new-password" required>
+  </label>
+  <button type="submit">Create administrator</button>
+</form>
+{{end}}

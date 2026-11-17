@@ -8,22 +8,19 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phases 8, 9 and 10 all landed this session, so every phase the admin UI
-consumes is done. Only Phase 11 (the web UI) and Phase 12 (packaging) remain,
-and 11 is now unblocked on all three of its dependencies.
+Phase 11 is split into four sub-phases, because nine deliverables is more than
+one session. 11.1 is done: the admin UI has a shell, cookie sessions with CSRF,
+an admin gate, and a setup gate that is bound to there being no users at all.
 
 ## Active Tasks
-- [DONE] Phase 8: Metadata providers & taxonomy (all four sub-phases)
-- [DONE] Phase 9: Kids & age gating
-- [DONE] Phase 10: Upload
-  - ✅ Resumable sessions: create, PUT chunks at boundary offsets, finalize
-  - ✅ Idempotent resends, missing-chunk reporting, hash check on finalize
-  - ✅ Format decided by sniffing content, not the filename
-  - ✅ `can_upload`, admin-only by default, with `upload_not_allowed`
-  - ✅ Ingest into `Author/Series/## - Title`, then a queued scan
-  - ✅ Abandoned sessions reaped through the Phase 4 job queue
-- [NEXT] Phase 11: Web admin UI — setup wizard, sources, users/devices, Fix
-  Match, the rating queue, genre mapping, job status
+- [DONE] Phases 8, 9, 10
+- [IN PROGRESS] Phase 11: Web admin UI
+  - ✅ 11.1: cookie sessions with CSRF, `embed.FS`, layout, sign-in/out, the
+    admin gate, the setup gate, and the first-admin form
+  - ⏭ 11.2: the setup wizard proper — first source, TLS mode, first scan
+  - ⏭ 11.3: sources, users, devices
+  - ⏭ 11.4: Fix Match, rating queue, genre mapping, job status, upload form.
+    htmx gets vendored here, where live job status first needs it
 - [LATER] Phase 12: packaging & release
 
 ## Test Media
@@ -98,7 +95,22 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-16] Phase 10: upload (uncommitted)
+- [2026-11-16] Phase 11.1: the admin UI shell and its authentication
+  (uncommitted)
+  - A browser is a device, so there is one revocation surface and a session
+    shows up in the authorized list
+  - One rule carries the safety: cookie auth needs CSRF on a non-GET, Bearer
+    auth never does. Phrased on the source of authentication, not the route,
+    so a new route cannot forget it and the apps are untouched
+  - `Secure` only where the client actually used TLS, which behind a tunnel
+    comes from a trusted proxy's `X-Forwarded-Proto`
+  - The setup gate counts users rather than reading a flag, so a bad restore
+    cannot reopen an unauthenticated admin-creation endpoint
+  - `authenticate` is now shared by the JSON login and the form, so the rate
+    limiting and timing equalisation cannot drift apart
+  - Verified by neutering the CSRF check and watching the write tests fail
+  - 445 tests pass, race-clean
+- [2026-11-16] Phase 10: upload (committed, 1335f1f)
   - A chunk is an offset on a boundary, so missing chunks are a set difference
     and a resend is an INSERT OR IGNORE rather than interval arithmetic
   - Bytes assemble in `<source>/.bard-ingest`, which the walker already skips,
@@ -232,19 +244,21 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 11: the web admin UI. Go templates plus vendored htmx, no Node, embedded
-with `embed`.
+Phase 11.2: the setup wizard proper — add the first source, choose TLS mode,
+run the first scan, all from the browser.
 
-What is ready: every API it needs exists and is tested — sources
-(`bard source add` has the shape), users and devices, Fix Match over
-`/api/v1/books/{id}/match`, overrides, uploads, and job status in the `jobs`
-table. `suggested_min_age` is populated, so the rating queue has rows to show.
+What is ready: `scan.CreateSource` and `scan.EnqueueSource` are what the wizard
+calls, and the shell, the CSRF plumbing and the "no users yet" gate all exist.
+The wizard currently ends at "admin created and signed in", so 11.2 extends it
+rather than starting it.
 
-What Phase 11 has to decide: how the UI authenticates, since every API route is
-behind a device token and a browser is not a device in the same sense. A
-session cookie that wraps a device token is the obvious answer and it has to
-not weaken the token model. Also: unlocking a field has to drop it from
-`locked` in the sidecar too, or the old value keeps outranking the file forever.
+What 11.2 has to decide: whether the wizard is one page with several steps or
+several pages with progress, and what it does when the path typed in does not
+exist or is not readable — the upload code already learned that a mode bit is
+not enough and a probe write is the honest check.
+
+Carried for 11.4: unlocking a field has to drop it from `locked` in the sidecar
+too, or the old value keeps outranking the file forever.
 
 ## Carried over from Phase 10
 - An EPUB without the spec-required `mimetype` entry is refused on upload,

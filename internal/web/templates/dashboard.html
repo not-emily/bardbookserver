@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1>Library</h1>
+
+<dl class="counts">
+  <dt>Books</dt><dd>{{.Stats.Books}}</dd>
+  <dt>Editions</dt><dd>{{.Stats.Editions}}</dd>
+  <dt>Files</dt><dd>{{.Stats.Files}}</dd>
+  <dt>Sources</dt><dd>{{.Stats.Sources}}</dd>
+  <dt>Accounts</dt><dd>{{.Stats.Users}}</dd>
+  <dt>Unrated</dt><dd>{{.Stats.Unrated}}</dd>
+</dl>
+
+{{if .Stats.PendingJobs}}
+<p class="notice">{{.Stats.PendingJobs}} job(s) queued or running.</p>
+{{end}}
+{{end}}

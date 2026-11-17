@@ -1,0 +1,106 @@
+/* Used at install time and a few times a year, so plain is the point. */
+:root {
+  --ink: #1b1a17;
+  --paper: #faf8f4;
+  --rule: #d9d3c7;
+  --accent: #5a4a2f;
+  --bad: #8c2f24;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  text-decoration: none;
+  color: var(--accent);
+}
+
+nav { display: flex; gap: 1rem; flex: 1; }
+
+nav a { color: var(--ink); text-decoration: none; }
+
+nav a:hover { text-decoration: underline; }
+
+.who { color: #6b6559; margin-right: 0.5rem; }
+
+form.inline { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+
+main { max-width: 52rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+
+h1 { font-size: 1.5rem; margin-top: 0; }
+
+.stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 22rem; }
+
+label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; }
+
+input[type="text"], input[type="password"], input[type="number"], select {
+  padding: 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: #fff;
+  font: inherit;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover { background: #46391f; }
+
+.error, .notice {
+  padding: 0.6rem 0.8rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+}
+
+.error { border-color: var(--bad); color: var(--bad); background: #fdf1ef; }
+
+.notice { background: #f3efe5; }
+
+.muted { color: #6b6559; font-size: 0.9rem; }
+
+dl.counts {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.25rem 1.5rem;
+  justify-content: start;
+}
+
+dl.counts dt { color: #6b6559; }
+
+dl.counts dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+table { border-collapse: collapse; width: 100%; }
+
+th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--rule); }
+
+footer {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0 1.25rem 2rem;
+  color: #6b6559;
+  font-size: 0.85rem;
+}

@@ -21,18 +21,43 @@ Make Bard installable and operable without SSH: first-run setup, sources, users,
 - Job and scan status with progress
 - Upload form
 
+## Sub-phases
+
+Nine deliverables is more than one session, so this phase runs in four.
+
+### 11.1: The shell and its authentication
+Cookie sessions with CSRF, `embed.FS`, layout, sign-in, the admin gate, and the
+setup gate. Done.
+
+### 11.2: The setup wizard
+The first source, TLS mode, and the first scan.
+
+### 11.3: Sources, users, devices
+
+### 11.4: Fix Match, the rating queue, genre mapping, job status, upload
+
 ## Files to Create
 
 - `internal/web/templates/*.html`
 - `internal/web/static/` — vendored htmx, minimal CSS
-- `internal/web/handlers.go`, `internal/web/setup.go`
-- `internal/web/embed.go` — `embed.FS`
+- `internal/web/embed.go` — `embed.FS`, template parsing, static handler
+- `internal/api/web_handlers.go` — the pages
+
+**Handlers live in `internal/api`, not `internal/web`.** The UI needs the same
+store, policies and logger the Server already holds, and the cookie path has to
+stay beside the Bearer path it must agree with. `internal/web` owns the
+templates and assets, which is the separable half.
 
 ## Dependencies
 
 **Internal:** Phases 8, 9, 10 for the features it exposes; Phase 2 for admin authorization.
 
 **External:** vendored htmx (one file, committed — no CDN, no Node, no build step).
+
+**htmx is not vendored yet.** 11.1 needs none of it: sign-in, sign-out and the
+dashboard are plain forms. Pulling a third-party file into the repo wants an
+explicit decision about version and provenance, so it waits until 11.4, where
+live job status is the first thing that actually needs it.
 
 ## Implementation Notes
 
@@ -50,8 +75,9 @@ Keep it plain. This UI is used at install time and then a few times a year.
 
 ## Validation
 
-- [ ] A fresh install reaches the setup wizard, creates an admin, adds a source, and completes a scan
-- [ ] The wizard is unreachable once a user exists
+- [~] A fresh install reaches the setup wizard, creates an admin, adds a source, and completes a scan
+      *(11.1: admin created and signed in; the source and the scan are 11.2)*
+- [x] The wizard is unreachable once a user exists
 - [ ] Editing a source's `default_min_age` visibly changes which books a restricted user can read
 - [ ] A device can be revoked from the UI and stops working immediately
 - [ ] A managed user can be created with a PIN
@@ -60,5 +86,5 @@ Keep it plain. This UI is used at install time and then a few times a year.
 - [ ] The rating queue bulk-confirms suggestions and leaves unconfirmed books unrated
 - [ ] Unmapped subjects are listed and can be mapped to a canonical genre
 - [ ] Scan progress is visible while a scan runs
-- [ ] A non-admin session cannot reach any admin page
-- [ ] The UI works with no outbound network access
+- [x] A non-admin session cannot reach any admin page
+- [x] The UI works with no outbound network access

@@ -1,0 +1,35 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} — Bard</title>
+  <link rel="stylesheet" href="/static/bard.css">
+</head>
+<body{{if .CSRFToken}} data-csrf="{{.CSRFToken}}"{{end}}>
+  {{if .User}}
+  <header>
+    <a class="brand" href="/">Bard</a>
+    <nav>
+      <a href="/sources">Sources</a>
+      <a href="/users">Users</a>
+      <a href="/devices">Devices</a>
+      <a href="/jobs">Jobs</a>
+    </nav>
+    <form method="post" action="/logout" class="inline">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <span class="who">{{.User.DisplayName}}</span>
+      <button type="submit">Sign out</button>
+    </form>
+  </header>
+  {{end}}
+
+  <main>
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+    {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+    {{template "content" .}}
+  </main>
+
+  <footer>Bard {{.Version}}</footer>
+</body>
+</html>{{end}}

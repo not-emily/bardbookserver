@@ -60,7 +60,10 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	server := NewServer(cfg, database, slog.Default(), "test")
+	server, err := NewServer(cfg, database, slog.Default(), "test")
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
 
 	store := auth.NewStore(database.DB)
 	user, err := store.CreateUser(ctx, auth.NewUser{

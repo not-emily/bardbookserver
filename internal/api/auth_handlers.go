@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/not-emily/bardbookserver/internal/auth"
+	"github.com/not-emily/bardbookserver/internal/model"
 	"github.com/not-emily/bardbookserver/internal/policy"
 )
 
@@ -27,6 +29,68 @@ type loginRequest struct {
 	DeviceName string `json:"device_name"`
 }
 
+var (
+	errBadCredentials  = errors.New("api: invalid credentials")
+	errTooManyAttempts = errors.New("api: too many attempts")
+)
+
+// throttled carries how long to wait, which the JSON path reports as
+// Retry-After.
+type throttled struct{ seconds float64 }
+
+func (t throttled) Error() string { return errTooManyAttempts.Error() }
+
+func (t throttled) Unwrap() error { return errTooManyAttempts }
+
+func retryAfterOf(err error) float64 {
+	var t throttled
+	if errors.As(err, &t) {
+		return t.seconds
+	}
+	return 1
+}
+
+// authenticate is shared by the JSON login and the admin UI's form, so the
+// rate limiting and the timing equalisation cannot drift between them.
+func (s *Server) authenticate(ctx context.Context, username, password string) (*model.User, error) {
+	addrKey := "addr:" + ClientAddr(ctx).String()
+	userKey := "user:" + username
+
+	// Both keys are checked: the address limit stops one host grinding, the
+	// username limit stops a distributed attempt on one account.
+	for _, key := range []string{addrKey, userKey} {
+		if ok, retryAfter := s.loginLimiter.Allow(key); !ok {
+			return nil, throttled{seconds: retryAfter.Seconds()}
+		}
+	}
+
+	user, err := s.store.UserByUsername(ctx, username)
+	switch {
+	case errors.Is(err, auth.ErrNotFound):
+		_, _ = auth.VerifyPassword(dummyHash(), password)
+		return nil, errBadCredentials
+	case err != nil:
+		return nil, err
+	}
+
+	// A managed profile has no password and is entered by switching.
+	if user.Managed || user.PasswordHash == "" {
+		return nil, errBadCredentials
+	}
+
+	ok, err := auth.VerifyPassword(user.PasswordHash, password)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errBadCredentials
+	}
+
+	s.loginLimiter.Reset(addrKey)
+	s.loginLimiter.Reset(userKey)
+	return user, nil
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if !decodeJSON(w, r, &req) {
@@ -37,50 +101,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addrKey := "addr:" + ClientAddr(r.Context()).String()
-	userKey := "user:" + req.Username
-
-	// Both keys are checked: the address limit stops one host grinding, the
-	// username limit stops a distributed attempt on one account.
-	for _, key := range []string{addrKey, userKey} {
-		if ok, retryAfter := s.loginLimiter.Allow(key); !ok {
-			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
-			writeError(w, http.StatusTooManyRequests, "too many attempts, try again later")
-			return
-		}
-	}
-
-	user, err := s.store.UserByUsername(r.Context(), req.Username)
+	user, err := s.authenticate(r.Context(), req.Username, req.Password)
 	switch {
-	case errors.Is(err, auth.ErrNotFound):
-		_, _ = auth.VerifyPassword(dummyHash(), req.Password)
+	case errors.Is(err, errTooManyAttempts):
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterOf(err))+1))
+		writeError(w, http.StatusTooManyRequests, "too many attempts, try again later")
+		return
+	case errors.Is(err, errBadCredentials):
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	case err != nil:
-		s.logger.Error("lookup user", "err", err)
+		s.logger.Error("authenticate", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-
-	// A managed profile has no password and is entered by switching.
-	if user.Managed || user.PasswordHash == "" {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	ok, err := auth.VerifyPassword(user.PasswordHash, req.Password)
-	if err != nil {
-		s.logger.Error("verify password", "err", err, "user", user.ID)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	s.loginLimiter.Reset(addrKey)
-	s.loginLimiter.Reset(userKey)
 
 	device, token, err := s.store.CreateDevice(r.Context(), user.ID, req.DeviceName)
 	if err != nil {

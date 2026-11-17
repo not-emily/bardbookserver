@@ -54,4 +54,7 @@ type Device struct {
 	LastSeenIP   string
 	LastSeenAt   *time.Time
 	CreatedAt    time.Time
+
+	// Required only of cookie auth; a browser sends cookies cross-site unasked.
+	CSRFToken string
 }
