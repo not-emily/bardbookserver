@@ -43,6 +43,17 @@ type pageData struct {
 	Unmapped []db.UnmappedSubject
 	Aliases  []aliasRow
 	Genres   []taxonomy.Genre
+
+	BookID     int64
+	EditionID  int64
+	Editions   []editionChoice
+	Matches    []matchRow
+	Unmatched  []matchRow
+	Candidates []candidateDTO
+	Locked     []lockRow
+	Providers  []string
+	Query      string
+	Author     string
 }
 
 type libraryStats struct {

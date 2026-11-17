@@ -165,6 +165,10 @@ func (s *Server) handler() http.Handler {
 	pages.HandleFunc("POST /ages", s.handleConfirmAges)
 	pages.HandleFunc("GET /genres", s.handleGenresPage)
 	pages.HandleFunc("POST /genres", s.handleMapSubject)
+	pages.HandleFunc("GET /matches", s.handleMatchesPage)
+	pages.HandleFunc("GET /books/{id}/match", s.handleBookMatchPage)
+	pages.HandleFunc("POST /books/{id}/match", s.handleBookMatchApply)
+	pages.HandleFunc("GET /upload", s.handleUploadPage)
 	mux.Handle("/", s.requireWebAuth(pages))
 
 	resolver := proxyResolver{trusted: s.cfg.TrustedPrefixes()}

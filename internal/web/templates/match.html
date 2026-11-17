@@ -1,0 +1,102 @@
+{{define "content"}}
+<h1>{{if .Title}}{{.Title}}{{else}}Fix match{{end}}</h1>
+
+{{if gt (len .Editions) 1}}
+<p class="muted">A provider record describes one manifestation, so pick the
+edition this applies to:</p>
+<p>
+  {{range .Editions}}
+  <a href="/books/{{$.BookID}}/match?edition_id={{.ID}}">{{if .Chosen}}<strong>{{.Label}}</strong>{{else}}{{.Label}}{{end}}</a>
+  {{end}}
+</p>
+{{end}}
+
+<form method="get" action="/books/{{.BookID}}/match" class="stack">
+  <input type="hidden" name="edition_id" value="{{.EditionID}}">
+  <label>
+    Search for something else
+    <input type="text" name="q" value="{{.Query}}" placeholder="title">
+  </label>
+  <label>
+    Author
+    <input type="text" name="author" value="{{.Author}}">
+  </label>
+  <button type="submit">Search</button>
+</form>
+
+{{if .Candidates}}
+<h2>Candidates</h2>
+<p class="muted">The ones below the line were refused automatically. Seeing the
+near miss is usually the point.</p>
+<table>
+  <thead><tr><th>Record</th><th>Score</th><th></th></tr></thead>
+  <tbody>
+    {{range .Candidates}}
+    <tr>
+      <td>
+        {{.Title}}{{if .Subtitle}}: {{.Subtitle}}{{end}}
+        <span class="muted">
+          {{range .Authors}}{{.}} {{end}}
+          {{if .Year}}· {{.Year}}{{end}}
+          {{if .ISBN}}· {{.ISBN}}{{end}}
+          {{if .ASIN}}· {{.ASIN}}{{end}}
+          · {{.Provider}}
+        </span>
+      </td>
+      <td>
+        {{printf "%.2f" .Score}}
+        {{if .Automatic}}<span class="muted">would match</span>{{end}}
+      </td>
+      <td>
+        <form method="post" action="/books/{{$.BookID}}/match" class="inline">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="edition_id" value="{{$.EditionID}}">
+          <input type="hidden" name="provider" value="{{.Provider}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <input type="hidden" name="q" value="{{$.Query}}">
+          <input type="hidden" name="author" value="{{$.Author}}">
+          <button type="submit">Apply</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else if .Providers}}
+<p class="muted">No candidates. Try searching for something else above.</p>
+{{end}}
+
+{{if .Locked}}
+<h2>Locked fields</h2>
+<p class="muted">A locked field outranks whatever the file and the providers
+say, so it survives every refresh until you unlock it.</p>
+<table>
+  <tbody>
+    {{range .Locked}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>
+        <form method="post" action="/books/{{$.BookID}}/match" class="inline">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="edition_id" value="{{$.EditionID}}">
+          <input type="hidden" name="unlock" value="{{.Name}}">
+          <button type="submit">Unlock</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+
+<form method="post" action="/books/{{.BookID}}/match" class="inline">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <input type="hidden" name="edition_id" value="{{.EditionID}}">
+  <input type="hidden" name="unpin" value="1">
+  <button type="submit">Unpin the chosen record</button>
+</form>
+<p class="muted">Unpinning asks for the match to be reconsidered on the next
+scan. It does not discard what was applied.</p>
+{{end}}
+
+<p><a href="/matches">Back to matches</a></p>
+{{end}}

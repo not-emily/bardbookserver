@@ -1,0 +1,50 @@
+{{define "content"}}
+<h1>Matches</h1>
+
+{{if .Matches}}
+<h2>Groupings Bard is unsure about</h2>
+<p class="muted">These editions were joined to a book on weak evidence. An
+over-eager merge hides a book behind the wrong cover.</p>
+<table>
+  <thead><tr><th>Book</th><th>Format</th><th>Why</th><th>Grouped with</th><th></th></tr></thead>
+  <tbody>
+    {{range .Matches}}
+    <tr>
+      <td>{{.Title}}</td>
+      <td>{{.Formats}}</td>
+      <td>{{.Reason}}</td>
+      <td>{{if .Grouping}}{{.Grouping}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td><a href="/books/{{.BookID}}/match">Fix</a></td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+
+<h2>No match confirmed</h2>
+{{if .Providers}}
+<p class="muted">Nobody has confirmed a provider record for these, so a wrong
+title or cover would still be sitting there.</p>
+{{else}}
+<p class="notice">No metadata provider is enabled, so there is nothing to
+search. Turn one on in <code>bard.yml</code> first.</p>
+{{end}}
+
+{{if .Unmatched}}
+<table>
+  <thead><tr><th>Book</th><th>Author</th><th>Formats</th><th></th></tr></thead>
+  <tbody>
+    {{range .Unmatched}}
+    <tr>
+      <td>{{.Title}}</td>
+      <td>{{if .Authors}}{{.Authors}}{{else}}<span class="muted">unknown</span>{{end}}</td>
+      <td>{{.Formats}}</td>
+      <td><a href="/books/{{.BookID}}/match">Fix</a></td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="muted">Nothing waiting.</p>
+{{end}}
+{{end}}

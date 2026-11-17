@@ -207,6 +207,81 @@ func (s *Scanner) ApplyMatch(ctx context.Context, target MatchTarget,
 	return nil
 }
 
+// LockedFields is what a person has frozen on a book and its edition.
+func LockedFields(ctx context.Context, database *sql.DB, editionID int64) (book, edition model.FieldSet, err error) {
+	err = database.QueryRowContext(ctx, `
+		SELECT b.locked_fields, e.locked_fields
+		  FROM editions e JOIN books b ON b.id = e.book_id
+		 WHERE e.id = ?`, editionID).Scan(&book, &edition)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, 0, ErrEditionNotFound
+	case err != nil:
+		return 0, 0, fmt.Errorf("read locks of edition %d: %w", editionID, err)
+	}
+	return book, edition, nil
+}
+
+// Unlock clears a lock in the database and in the sidecar. Both, because a
+// lock left in the sidecar keeps outranking the file forever — the index would
+// forget and a rebuild would remember.
+func (s *Scanner) Unlock(ctx context.Context, editionID int64, field model.FieldSet) error {
+	var bookID int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT book_id FROM editions WHERE id = ?`, editionID).Scan(&bookID); err != nil {
+		return fmt.Errorf("read book of edition %d: %w", editionID, err)
+	}
+
+	bookLocks, editionLocks, err := LockedFields(ctx, s.db, editionID)
+	if err != nil {
+		return err
+	}
+
+	// The cleared value is computed here rather than as `locked_fields & ~?`,
+	// because the complement of a FieldSet does not fit SQLite's signed integer.
+	for _, target := range []struct {
+		table string
+		id    int64
+		locks model.FieldSet
+	}{
+		{"books", bookID, bookLocks.Without(field)},
+		{"editions", editionID, editionLocks.Without(field)},
+	} {
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE `+target.table+` SET locked_fields = ? WHERE id = ?`,
+			target.locks, target.id); err != nil {
+			return fmt.Errorf("unlock %s %d: %w", target.table, target.id, err)
+		}
+	}
+	s.unlockSidecar(ctx, editionID, field)
+	return nil
+}
+
+func (s *Scanner) unlockSidecar(ctx context.Context, editionID int64, field model.FieldSet) {
+	dir, key, enabled, err := sidecarLocation(ctx, s.db, editionID)
+	switch {
+	case err != nil:
+		s.logger.Warn("locating sidecar", "edition", editionID, "error", err)
+		return
+	case !enabled || dir == "":
+		return
+	}
+
+	file, err := sidecar.Read(dir)
+	if err != nil {
+		s.logger.Warn("reading sidecar", "dir", dir, "error", err)
+		return
+	}
+
+	entry := file.Editions[key]
+	entry.Locked = model.ParseFields(entry.Locked).Without(field).Names()
+	file.Editions[key] = entry
+
+	if _, err := file.Write(dir); err != nil {
+		s.logger.Warn("writing sidecar", "dir", dir, "error", err)
+	}
+}
+
 // locksFor locks what the chosen record actually filled, so an empty
 // description does not freeze the field against a later provider.
 func locksFor(md metadata.Metadata) (book, edition model.FieldSet) {

@@ -19,7 +19,8 @@ Make Bard installable and operable without SSH: first-run setup, sources, users,
 - Age-rating queue: unrated books with suggestions, bulk confirm
 - Genre mapping review for unmapped `raw_subjects`
 - Job and scan status with progress
-- Upload form
+- Upload form — needs a secure context for `crypto.subtle`, and says so rather
+  than failing cryptically
 
 ## Sub-phases
 
@@ -48,6 +49,7 @@ Done. Both consume Phase 8's output, and they share the `genre_aliases`
 foundation.
 
 ### 11.4b: Fix Match and the upload form
+Done, which completes Phase 11.
 
 **htmx is not vendored, and will not be.** The plan assumed it, but every page
 here turned out to be a plain form, and the one thing that genuinely needs
@@ -97,8 +99,12 @@ Keep it plain. This UI is used at install time and then a few times a year.
       *(11.3: the edit form counts the books inheriting it before you save)*
 - [x] A device can be revoked from the UI and stops working immediately
 - [x] A managed user can be created with a PIN
-- [ ] Fix Match finds a book, lists candidates, and applying one updates metadata
-- [ ] A hand-edited field shows as locked and survives a refresh triggered from the UI
+- [x] Fix Match finds a book, lists candidates, and applying one updates metadata
+      *(11.4b: verified live — five real Open Library candidates for Anne of
+      Green Gables, applying one set the title, description and author)*
+- [x] A hand-edited field shows as locked and survives a refresh triggered from the UI
+      *(11.4b: and unlocking clears the sidecar too, or the old value would
+      keep outranking the file forever)*
 - [x] The rating queue bulk-confirms suggestions and leaves unconfirmed books unrated
 - [x] Unmapped subjects are listed and can be mapped to a canonical genre
 - [~] Scan progress is visible while a scan runs

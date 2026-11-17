@@ -373,6 +373,63 @@ func TestApplyMatchWritesTheSidecar(t *testing.T) {
 	}
 }
 
+// A lock left in the sidecar keeps outranking the file forever: the index
+// would forget it and a rebuild would remember.
+func TestUnlockingClearsTheSidecarToo(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Tolkien")
+	writeFixtureEPUB(t, filepath.Join(dir, "fotr.epub"))
+
+	s, d, sourceID := sidecarScanner(t, root, true)
+	mustScan(t, s, sourceID)
+
+	var editionID, bookID int64
+	if err := d.QueryRow(`SELECT id, book_id FROM editions`).Scan(&editionID, &bookID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deliberately not what the file says, so the revert is visible.
+	target := MatchTarget{EditionID: editionID, BookID: bookID, Kind: model.KindEbook}
+	if err := s.ApplyMatch(context.Background(), target, metadata.Metadata{
+		Title:       "A Title The File Disagrees With",
+		Description: "Chosen by hand.",
+	}, Match{Provider: "stub", ProviderID: "chosen-1", Manual: true}); err != nil {
+		t.Fatalf("apply match: %v", err)
+	}
+
+	if locked := model.ParseFields(readSidecar(t, dir).Editions["fotr.epub"].Locked); !locked.Has(model.FieldTitle) {
+		t.Fatal("the title was not locked to begin with")
+	}
+
+	if err := s.Unlock(context.Background(), editionID, model.FieldTitle); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+
+	locked := model.ParseFields(readSidecar(t, dir).Editions["fotr.epub"].Locked)
+	if locked.Has(model.FieldTitle) {
+		t.Error("the title is still locked in the sidecar")
+	}
+	if !locked.Has(model.FieldDescription) {
+		t.Error("unlocking the title cleared another field in the sidecar")
+	}
+
+	// A rebuilt index reads the sidecar, so the file's title wins again — which
+	// is the whole reason the lock had to leave both places.
+	s2, d2, sourceID2 := sidecarScanner(t, root, true)
+	mustScan(t, s2, sourceID2)
+
+	titles := queryStrings(t, d2, `SELECT title FROM books`)
+	if len(titles) != 1 || titles[0] != "The Fellowship of the Ring" {
+		t.Errorf("titles after a rebuild are %v, want the file's", titles)
+	}
+
+	// The description was never unlocked, so it still outranks the file.
+	descriptions := queryStrings(t, d2, `SELECT COALESCE(description, '') FROM books`)
+	if len(descriptions) != 1 || descriptions[0] != "Chosen by hand." {
+		t.Errorf("descriptions after a rebuild are %v, want the locked one", descriptions)
+	}
+}
+
 // An automatic match is not pinned, so a better score stays free to win.
 func TestAnAutomaticMatchIsNotPinned(t *testing.T) {
 	root := tree(t, "Tolkien/The Hobbit.epub")

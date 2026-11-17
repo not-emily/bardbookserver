@@ -2,32 +2,25 @@
 
 ## Plan Files
 Roadmap: [plan.md](../docs/plan/plan.md)
-Current Phase: [phase-11.md](../docs/plan/phases/phase-11.md)
+Current Phase: [phase-12.md](../docs/plan/phases/phase-12.md)
 Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 
-Last Updated: 2026-11-16
+Last Updated: 2026-11-17
 
 ## Current Focus
-Phase 11 runs in four sub-phases; three are done. An install now goes from an
-empty database to an indexed library, extra accounts, managed profiles with
-PINs, and device revocation entirely in a browser. Only the content-correction
-pages (11.4) are left.
+**Phase 11 is complete, so only Phase 12 remains.** Bard can be installed,
+configured, filled and corrected entirely from a browser: setup wizard,
+sources, accounts, devices, uploads, Fix Match, the rating queue and genre
+mapping. No Node, no vendored JavaScript, no build step beyond `go build`.
 
 ## Active Tasks
-- [DONE] Phases 8, 9, 10
-- [IN PROGRESS] Phase 11: Web admin UI
-  - ✅ 11.1: cookie sessions with CSRF, `embed.FS`, layout, sign-in/out, the
-    admin gate, the setup gate, and the first-admin form
-  - ✅ 11.2: the wizard's remaining steps — first source with honest path
-    errors, first scan with live counts, and TLS reported rather than written
-  - ✅ 11.3: sources list and edit (with the inheritance count and a path move
-    that carries the indexed files), accounts and managed profiles with PINs,
-    devices with revoke, and a jobs page
-  - ✅ 11.4a: the rating queue and genre mapping, over a new `genre_aliases`
-    table. htmx turned out to earn nothing and is not vendored
-  - ⏭ 11.4b: Fix Match and the upload form. Fix Match is wiring an API that is
-    already tested; the uploader is ~50 lines of hand-written JS
-- [LATER] Phase 12: packaging & release
+- [DONE] Phases 8, 9, 10, 11 (all four sub-phases)
+- [NEXT] Phase 12: packaging & release — goreleaser, static amd64/arm64
+  binaries, systemd unit, Docker image, the three deploy recipes, and
+  backup/export
+- Phase 12's export has to cover what is authored rather than derived:
+  `genre_aliases`, `book_overrides`, `provider_matches`, PINs, and every
+  account's progress, ratings, shelves and annotations
 
 ## Test Media
 Real books live in `../sample-media`, outside the repo, and never go into it.
@@ -91,17 +84,42 @@ Nothing is blocked. These are known limitations carried forward.
 - Annotation positions are stored as the client sends them (CFI, page,
   seconds). Nothing validates that a CFI belongs to the edition it is filed
   under, so a buggy client can store an unresolvable highlight.
-- Unlocking a field in the Phase 11 admin UI must also drop it from `locked` in
-  the sidecar, or the old value keeps outranking the file forever. Renaming an
-  entry in `model.fieldNames` silently unlocks that field in every sidecar
-  already on disk.
+- **Initials do not match expanded given names**, so a book Bard knows as
+  "L. M. Montgomery" scores 0.30 against Open Library's "Lucy Maud
+  Montgomery" — surname agreeing, the rest not — and never matches
+  automatically. For a Gutenberg-heavy library that is most books. Fix Match
+  settles it in two clicks, but it holds the unattended match rate below the
+  plan's 80% target and is worth a scoring follow-up.
+- Renaming an entry in `model.fieldNames` silently unlocks that field in every
+  sidecar already on disk.
 - MP3 durations run ~0.04s long per file where an encoder wrote no gapless
   info. 1.7s over 16 hours, inside the plan's handoff tolerance.
 - QuickTime text chapter tracks in M4B are not read, only the Nero `chpl` atom.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-17] Phase 11.4a: the rating queue and genre mapping (uncommitted)
+- [2026-11-17] Phase 11.4b: Fix Match and the upload form (uncommitted)
+  - A match page showing ranked candidates including the ones the automatic
+    matcher refused, with a search box for looking up something else entirely
+  - Locked fields are listed and unlockable, and **unlocking clears the
+    sidecar as well as the index** — a lock left in the sidecar would keep
+    outranking the file forever, since the index forgets and a rebuild
+    remembers
+  - The uploader is about a hundred lines of hand-written JS: `crypto.subtle`
+    for the hash, `File.slice` for the pieces, and the CSRF header because a
+    cookie-authenticated write needs one. It checks `isSecureContext` and
+    explains itself rather than failing on the first click
+  - Found by test: clearing a lock as `locked_fields & ~?` overflows SQLite's
+    signed integer, since the complement of a FieldSet does not fit. The new
+    value is computed in Go
+  - **Found live, worth a decision:** Bard has "L. M. Montgomery" where Open
+    Library has "Lucy Maud Montgomery". The surname matches but initials
+    against expanded given names do not, so the score halves to 0.30 and
+    nothing auto-matches. For a Gutenberg-heavy library that is most books.
+    Fix Match handles it in two clicks, but Phase 8's unattended match rate is
+    lower than the plan's 80% target because of it
+  - 498 tests pass, race-clean
+- [2026-11-17] Phase 11.4a: the rating queue and genre mapping (committed, fab0f1d)
   - A genre mapping is a rule about strings, not a fact about a book, so there
     is no sidecar to carry it. It joins the other admin decisions already in
     the database and is export-critical for Phase 12
@@ -114,7 +132,7 @@ Nothing is blocked. These are known limitations carried forward.
     plain form, and the one thing needing scripting — `File.slice` plus
     `crypto.subtle` for a chunked upload — is something htmx cannot do
   - 487 tests pass, race-clean
-- [2026-11-17] Phase 11.3: sources, accounts and devices (uncommitted)
+- [2026-11-17] Phase 11.3: sources, accounts and devices (committed, fab0f1d)
   - The source edit form counts the books inheriting its age before you change
     it, which is Decision 5's inheritance made visible rather than silent
   - A moved library is a path edit that rewrites `files.path` in the same
@@ -296,25 +314,26 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 11.4b, the last of Phase 11: Fix Match and the upload form.
+Phase 12: packaging and release. The last phase, and the one that makes this
+installable by someone other than its author.
 
-What is ready: Fix Match is `GET/POST/DELETE /api/v1/books/{id}/match`, all
-tested, and `Rank` already keeps the candidates the automatic matcher refused
-— which is exactly what the page shows. `grouping.ListUncertain` is the "needs
-attention" list. Uploads are four working endpoints.
+What is ready: the binary is already static and cgo-free, so the cross-compile
+matrix is a goreleaser config rather than a porting job. Every deployment
+decision the recipes have to document is already settled and written down —
+Cloudflare Tunnel as the recommended default, `trusted_proxies` as the setting
+that fails silently both ways, TLS reported rather than written by the wizard.
+`docs/providers.md` and `docs/upload.md` are the shape the recipes should take.
 
-What 11.4b has to do: a per-book match page (candidates, apply, unpin), a list
-of books worth reviewing, and an upload page with roughly fifty lines of
-hand-written JS using `File.slice`, `crypto.subtle.digest` and `fetch`.
+What Phase 12 has to decide: what `bard export` covers. The rule that fell out
+of 11.4a is the one to follow — everything *authored* rather than derived.
+That is `genre_aliases`, `book_overrides`, `provider_matches`, the PINs, and
+every account's progress, ratings, shelves, reading state and annotations. The
+index itself is rebuildable from disk and sidecars, so it does not need
+backing up; the user state does, and nothing currently says so to the user.
 
-The one constraint: `crypto.subtle` exists only in a secure context, so the
-uploader works behind the tunnel and on localhost but not over plain-HTTP LAN.
-The page checks `isSecureContext` and says so rather than failing cryptically.
-A capped no-JS multipart fallback was considered and dropped, since this
-deployment is always HTTPS.
-
-Also for 11.4b: unlocking a field has to drop it from `locked` in the sidecar
-too, or the old value keeps outranking the file forever.
+Worth considering alongside it: the author-initials scoring gap above, which is
+a small change to `namesAgree` with real consequences for the match rate. It is
+independent of Phase 12 and could go either before or after.
 
 ## Carried over from Phase 10
 - An EPUB without the spec-required `mimetype` entry is refused on upload,
