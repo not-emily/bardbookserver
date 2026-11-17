@@ -3,6 +3,105 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-17: A genre mapping is a rule, so it lives in the database
+
+**Decision:** `genre_aliases` maps a normalised subject key onto a canonical
+slug. It is not written to a sidecar. Mapping a subject applies it to the books
+already carrying it and records the rule for later scans, and an admin mapping
+outranks the built-in table.
+
+**Rationale:** A per-book genre edit does belong in a sidecar, and already
+works that way — `LockedMetadata` returns `Subjects` under `FieldGenres`, so a
+hand-set genre survives a database rebuild. But "the string `Fantasy fiction`
+means fantasy" is a rule about strings, not a fact about a book, and a sidecar
+is per-directory: there is nowhere in one to put it.
+
+Decision 3 calls the database a rebuildable index, which argues against keeping
+anything authored there. But it already holds a great deal that is not
+derivable from disk: every account's progress, ratings, shelves, annotations
+and age overrides, the PINs, and the pinned provider matches. A genre alias is
+that category, and the answer to that category is Phase 12's backup, not
+sidecars.
+
+Applying it immediately matters because the alternative is "now rescan five
+thousand books to see the effect". The subject also leaves `raw_subjects`,
+since it is no longer unmapped.
+
+**Alternatives Considered:** A file in the data directory, which would survive
+deleting the database and could be hand-edited — closer to Decision 3's
+spirit, but a second config store with a reload path, for data that behaves
+like every other admin decision already in the database. Per-book edits only,
+which is smaller and leaves the same dirty string unmapped on the next
+thousand books.
+
+**Impact:** `taxonomy.Classify` became `Classifier.Classify`, with the
+package-level function kept for callers that have no mappings. The scanner
+reads the aliases once per process, so a mapping entered while a scan is
+running applies to the next one — pinned by
+`TestAnAdminAliasAppliesOnARescan`. `genre_aliases` is export-critical for
+Phase 12.
+
+---
+
+## 2026-11-17: htmx is not vendored, because nothing needed it
+
+**Decision:** No JavaScript library is vendored. The admin UI is plain forms
+plus a `<meta refresh>` where a page watches work in progress, and the one page
+that needs scripting gets hand-written JavaScript.
+
+**Rationale:** The plan specified Go templates plus vendored htmx, and 11.1
+through 11.4a were written expecting to need it. They did not: sources, users,
+devices, the rating queue and genre mapping are all forms, and job progress is
+one line of HTML. The only thing that genuinely requires scripting is chunking
+an upload — `File.slice` plus `crypto.subtle.digest` — which htmx has no
+facility for.
+
+So the dependency would have been carried for nothing: a version to track, a
+third-party file in the repo to vet, and bytes in the binary. Not vendoring it
+keeps `go build` the entire build story, which is the actual goal the htmx
+choice was serving.
+
+**Alternatives Considered:** Vendoring it anyway for later use, which is a
+dependency on speculation. A single-page app, which needs the Node build step
+the plan rules out.
+
+**Impact:** `<meta http-equiv="refresh">` is honest rather than fake: per-book
+scan progress is not persisted anywhere, so a poll could only show the same
+counts. The upload page's script is ours, which removes the provenance
+question the vendoring would have raised.
+
+---
+
+## 2026-11-17: A moved library is a path edit, which carries the indexed files
+
+**Decision:** A source's path is editable, and changing it rewrites
+`files.path` for every file under the old prefix in the same transaction.
+Deleting and re-adding a source is not the way to move a library.
+
+**Rationale:** "I moved my audiobooks to a bigger disk" is a real event, and
+both obvious answers are wrong. Re-adding the source deletes the old editions,
+and progress, ratings and annotations all hang off edition ids — so the move
+would silently cost the household its reading. Editing the path *without*
+rewriting the files is worse: the next scan sweeps every file as missing,
+empties the editions, and cascades the same state away while looking like it
+worked.
+
+Rewriting the prefix keeps the edition rows, so nothing user-facing notices.
+The grouping decisions survive independently, since their keys are already
+relative to the source path.
+
+**Alternatives Considered:** Making the path read-only and documenting
+delete-and-re-add, which is the data loss above with extra steps. Detecting the
+move during a scan by content hash, which the scanner deliberately does not
+compute — hashing every file is the cost Phase 4 declined.
+
+**Impact:** The form says what it is for, because an admin who types a path
+that is *not* where the files went gets an index full of broken paths until the
+next scan sweeps them. Deleting a source is deliberately not offered: disabling
+is the reversible version and achieves the practical need.
+
+---
+
 ## 2026-11-17: The wizard reports TLS rather than writing the config
 
 **Decision:** The setup wizard's last step shows `bind_addr`, `tls.mode` and a

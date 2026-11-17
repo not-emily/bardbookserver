@@ -1,0 +1,37 @@
+{{define "content"}}
+{{if .Scanning}}<meta http-equiv="refresh" content="5">{{end}}
+<h1>Sources</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th><th>Directory</th><th>Books</th><th>Minimum age</th>
+      <th>Last scanned</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .SourceRows}}
+    <tr>
+      <td>
+        {{.Name}}
+        {{if not .Enabled}}<span class="muted">(disabled)</span>{{end}}
+        {{if .HideWhenLocked}}<span class="muted">(hidden when locked)</span>{{end}}
+      </td>
+      <td><code>{{.Path}}</code></td>
+      <td>{{.Books}}</td>
+      <td>{{if .DefaultMinAge}}{{.DefaultMinAge}}{{else if eq .Books 0}}—{{else}}<span class="muted">unset</span>{{end}}</td>
+      <td>{{if .LastScanFinishedAt}}{{.LastScanFinishedAt.Format "2 Jan 15:04"}}{{else}}never{{end}}</td>
+      <td class="actions">
+        <a href="/sources/{{.ID}}/edit">Edit</a>
+        <form method="post" action="/sources/{{.ID}}/scan" class="inline">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <button type="submit">Scan</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+
+<p><a href="/sources/new">Add a source</a></p>
+{{end}}

@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/not-emily/bardbookserver/internal/db"
+	"github.com/not-emily/bardbookserver/internal/jobs"
 	"github.com/not-emily/bardbookserver/internal/model"
+	"github.com/not-emily/bardbookserver/internal/taxonomy"
 )
 
 // pageData is what every template is rendered with.
@@ -21,11 +24,25 @@ type pageData struct {
 
 	// Wizard is set while setup is incomplete, so a page can read as a step
 	// during setup and as a plain admin page afterwards.
-	Wizard   bool
-	Sources  []*model.Source
-	Scanning bool
-	BindAddr string
-	TLSMode  string
+	Wizard     bool
+	FormAction string
+	Sources    []*model.Source
+	Scanning   bool
+	BindAddr   string
+	TLSMode    string
+
+	SourceRows      []sourceRow
+	Source          *model.Source
+	InheritingBooks int
+	Users           []*model.User
+	Owners          []*model.User
+	Devices         []deviceRow
+	JobCounts       map[jobs.State]int
+
+	Unrated  []db.UnratedBook
+	Unmapped []db.UnmappedSubject
+	Aliases  []aliasRow
+	Genres   []taxonomy.Genre
 }
 
 type libraryStats struct {
@@ -206,9 +223,19 @@ func (s *Server) requireWebAuth(next http.Handler) http.Handler {
 			http.Redirect(w, r, stepAdmin, http.StatusSeeOther)
 			return
 		}
-		if cookieToken(r) == "" && bearerToken(r) == "" {
+		token := cookieToken(r)
+		if token == "" && bearerToken(r) == "" {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
+		}
+		// A revoked or expired session is sent to sign in again rather than
+		// handed the 401 an app would get.
+		if token != "" {
+			if _, err := s.store.DeviceByToken(r.Context(), token); err != nil {
+				ClearSessionCookie(w, r)
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				return
+			}
 		}
 		authed.ServeHTTP(w, r)
 	})

@@ -8,9 +8,10 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 11 runs in four sub-phases. 11.1 and 11.2 are done: an install now goes
-from an empty database to an indexed library entirely in a browser, which was
-the point of the phase. Walked against the real sample library.
+Phase 11 runs in four sub-phases; three are done. An install now goes from an
+empty database to an indexed library, extra accounts, managed profiles with
+PINs, and device revocation entirely in a browser. Only the content-correction
+pages (11.4) are left.
 
 ## Active Tasks
 - [DONE] Phases 8, 9, 10
@@ -19,10 +20,13 @@ the point of the phase. Walked against the real sample library.
     admin gate, the setup gate, and the first-admin form
   - ✅ 11.2: the wizard's remaining steps — first source with honest path
     errors, first scan with live counts, and TLS reported rather than written
-  - ⏭ 11.3: sources, users, devices. The source form already doubles as the
-    add-source page, so 11.3 starts from a list and an edit form
-  - ⏭ 11.4: Fix Match, rating queue, genre mapping, job status, upload form.
-    htmx gets vendored here, where live job status first needs it
+  - ✅ 11.3: sources list and edit (with the inheritance count and a path move
+    that carries the indexed files), accounts and managed profiles with PINs,
+    devices with revoke, and a jobs page
+  - ✅ 11.4a: the rating queue and genre mapping, over a new `genre_aliases`
+    table. htmx turned out to earn nothing and is not vendored
+  - ⏭ 11.4b: Fix Match and the upload form. Fix Match is wiring an API that is
+    already tested; the uploader is ~50 lines of hand-written JS
 - [LATER] Phase 12: packaging & release
 
 ## Test Media
@@ -97,7 +101,36 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
-- [2026-11-17] Phase 11.2: the setup wizard (uncommitted)
+- [2026-11-17] Phase 11.4a: the rating queue and genre mapping (uncommitted)
+  - A genre mapping is a rule about strings, not a fact about a book, so there
+    is no sidecar to carry it. It joins the other admin decisions already in
+    the database and is export-critical for Phase 12
+  - Mapping applies to the books already carrying the subject rather than
+    waiting for a rescan of 5000 titles, and the subject leaves `raw_subjects`
+  - An admin mapping outranks the built-in table, since it exists to correct it
+  - Confirming an age is per-row and explicit; a suggestion left alone stays a
+    suggestion, and a nonsense age is ignored rather than saved
+  - **htmx is not vendored and will not be.** Every page turned out to be a
+    plain form, and the one thing needing scripting — `File.slice` plus
+    `crypto.subtle` for a chunked upload — is something htmx cannot do
+  - 487 tests pass, race-clean
+- [2026-11-17] Phase 11.3: sources, accounts and devices (uncommitted)
+  - The source edit form counts the books inheriting its age before you change
+    it, which is Decision 5's inheritance made visible rather than silent
+  - A moved library is a path edit that rewrites `files.path` in the same
+    transaction. Re-adding the source would delete every edition and cascade
+    away the progress, ratings and annotations hanging off edition ids
+  - Deleting a source is deliberately not offered; disabling is reversible and
+    achieves the practical need
+  - An admin cannot remove their own admin flag, which would lock the household
+    out of the interface with nothing but the CLI to get back in
+  - Found while testing: a revoked session on a page navigation got the 401 an
+    app would get. It redirects to sign-in and clears the cookie now
+  - Verified live: 6 books listed per source, the inheritance notice counting
+    6, a managed profile with a PIN and a birth date, the source age raised to
+    18, and revoking your own session signing you out
+  - 476 tests pass, race-clean
+- [2026-11-17] Phase 11.2: the setup wizard (committed, f96c199)
   - Setup state is derived, not stored, so a half-finished wizard resumes where
     it stopped and no flag can be reset by a bad restore
   - The scan is the last page but not a gate: gating on it would trap an
@@ -263,21 +296,24 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 11.3: sources, users and devices.
+Phase 11.4b, the last of Phase 11: Fix Match and the upload form.
 
-What is ready: `setup_source.html` already renders as a plain add-source page
-once setup is complete, and `scan.AllSources` feeds the table the scan step
-uses. `describePath` and `optionalAge` are reusable for an edit form.
-`/api/v1/devices` and its revoke already exist and are tested, so the devices
-page is a table over data that works.
+What is ready: Fix Match is `GET/POST/DELETE /api/v1/books/{id}/match`, all
+tested, and `Rank` already keeps the candidates the automatic matcher refused
+— which is exactly what the page shows. `grouping.ListUncertain` is the "needs
+attention" list. Uploads are four working endpoints.
 
-What 11.3 has to decide: editing a source's `default_min_age` has visible
-consequences for every book inheriting it — the plan asks for that to be shown
-rather than silent, so the edit form wants a "this affects N books" line
-before saving. Also whether changing a path is allowed at all: it would
-orphan every indexed file under the old one.
+What 11.4b has to do: a per-book match page (candidates, apply, unpin), a list
+of books worth reviewing, and an upload page with roughly fifty lines of
+hand-written JS using `File.slice`, `crypto.subtle.digest` and `fetch`.
 
-Carried for 11.4: unlocking a field has to drop it from `locked` in the sidecar
+The one constraint: `crypto.subtle` exists only in a secure context, so the
+uploader works behind the tunnel and on localhost but not over plain-HTTP LAN.
+The page checks `isSecureContext` and says so rather than failing cryptically.
+A capped no-JS multipart fallback was considered and dropped, since this
+deployment is always HTTPS.
+
+Also for 11.4b: unlocking a field has to drop it from `locked` in the sidecar
 too, or the old value keeps outranking the file forever.
 
 ## Carried over from Phase 10

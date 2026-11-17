@@ -13,8 +13,39 @@ import (
 // applySubjects writes the genre facet and keeps what it could not map. The
 // suggestion is written whatever the locks say, since nothing reads it as a
 // decision.
+// classifier is loaded once per scan, so a mapping an admin entered applies to
+// every book the scan touches without a query each time.
+func (s *Scanner) classifier(ctx context.Context) taxonomy.Classifier {
+	s.once.Do(func() {
+		aliases, err := loadAliases(ctx, s.db)
+		if err != nil {
+			s.logger.Error("read genre aliases", "error", err)
+		}
+		s.aliases = aliases
+	})
+	return taxonomy.NewClassifier(s.aliases)
+}
+
+func loadAliases(ctx context.Context, database *sql.DB) (map[string]string, error) {
+	rows, err := database.QueryContext(ctx, `SELECT subject, genre_slug FROM genre_aliases`)
+	if err != nil {
+		return nil, fmt.Errorf("read genre aliases: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var subject, slug string
+		if err := rows.Scan(&subject, &slug); err != nil {
+			return nil, fmt.Errorf("scan genre alias: %w", err)
+		}
+		out[subject] = slug
+	}
+	return out, rows.Err()
+}
+
 func applySubjects(ctx context.Context, tx *sql.Tx, bookID int64,
-	md metadata.Metadata, locked bool) error {
+	md metadata.Metadata, locked bool, classifier taxonomy.Classifier) error {
 
 	if err := setSuggestedAge(ctx, tx, bookID, md); err != nil {
 		return err
@@ -23,7 +54,7 @@ func applySubjects(ctx context.Context, tx *sql.Tx, bookID int64,
 		return nil
 	}
 
-	slugs, raw := taxonomy.Classify(md.Subjects)
+	slugs, raw := classifier.Classify(md.Subjects)
 	if err := replaceGenres(ctx, tx, bookID, slugs); err != nil {
 		return err
 	}

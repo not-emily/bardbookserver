@@ -51,6 +51,15 @@ func (s *stubProvider) Fetch(_ context.Context, _ provider.Query, _ provider.Can
 	return s.md, nil
 }
 
+// sameDBScanner is a second scanner over an existing database, for asserting
+// what a later scan in a fresh process does.
+func sameDBScanner(t *testing.T, d *db.DB, p provider.Provider) *Scanner {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return NewScanner(d.DB, media.NewCache(t.TempDir()),
+		provider.NewRegistry(logger, p), logger)
+}
+
 func scannerWith(t *testing.T, root string, p provider.Provider) (*Scanner, *db.DB, int64) {
 	t.Helper()
 	d := testDB(t)

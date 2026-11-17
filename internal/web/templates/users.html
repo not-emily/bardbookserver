@@ -1,0 +1,118 @@
+{{define "content"}}
+<h1>Accounts</h1>
+
+<table>
+  <thead>
+    <tr><th>Account</th><th>Access</th><th>Age</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Users}}
+    <tr>
+      <td>
+        {{.DisplayName}} <span class="muted">{{.Username}}</span>
+        {{if .Managed}}<span class="muted">· profile{{if .HasPIN}}, PIN{{end}}</span>{{end}}
+      </td>
+      <td>
+        {{if .IsAdmin}}admin{{else}}reader{{end}}
+        {{if .CanUpload}}· may upload{{end}}
+      </td>
+      <td>
+        {{if .Restricted}}
+          restricted{{with .BirthDate}} · born {{.Format "2006-01-02"}}{{end}}
+        {{else}}
+          <span class="muted">unrestricted</span>
+        {{end}}
+      </td>
+      <td>
+        <form method="post" action="/users/{{.ID}}" class="stack tight">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="display_name" value="{{.DisplayName}}">
+          <label class="row">
+            <input type="checkbox" name="is_admin" value="1" {{if .IsAdmin}}checked{{end}}>
+            Admin
+          </label>
+          <label class="row">
+            <input type="checkbox" name="can_upload" value="1" {{if .CanUpload}}checked{{end}}>
+            Upload
+          </label>
+          <label class="row">
+            <input type="checkbox" name="restricted" value="1" {{if .Restricted}}checked{{end}}>
+            Restricted
+          </label>
+          <input type="date" name="birth_date"
+                 value="{{with .BirthDate}}{{.Format "2006-01-02"}}{{end}}">
+          <button type="submit">Save</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+
+<h2>Add an account</h2>
+<form method="post" action="/users" class="stack">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label>
+    Username
+    <input type="text" name="username" required>
+  </label>
+  <label>
+    Display name
+    <input type="text" name="display_name">
+  </label>
+  <label>
+    Password
+    <input type="password" name="password" autocomplete="new-password">
+  </label>
+  <label class="row">
+    <input type="checkbox" name="is_admin" value="1"> Administrator
+  </label>
+  <label class="row">
+    <input type="checkbox" name="can_upload" value="1"> May add books
+  </label>
+  <label class="row">
+    <input type="checkbox" name="restricted" value="1"> Age-restricted
+  </label>
+  <label>
+    Birth date <span class="muted">required if restricted</span>
+    <input type="date" name="birth_date">
+  </label>
+  <p class="muted">Bard stores the birth date rather than an age, so
+  age-appropriate books unlock on their own birthday with nothing to do here.</p>
+  <button type="submit">Create account</button>
+</form>
+
+<h2>Add a profile on a shared device</h2>
+<p class="muted">A profile has no password. It is entered by switching from a
+device already signed in as its owner, and a PIN can gate switching back.</p>
+<form method="post" action="/users" class="stack">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <input type="hidden" name="managed" value="1">
+  <label>
+    Username
+    <input type="text" name="username" required>
+  </label>
+  <label>
+    Display name
+    <input type="text" name="display_name">
+  </label>
+  <label>
+    Belongs to
+    <select name="owner_id" required>
+      {{range .Owners}}<option value="{{.ID}}">{{.DisplayName}}</option>{{end}}
+    </select>
+  </label>
+  <label>
+    PIN <span class="muted">optional</span>
+    <input type="text" name="pin" inputmode="numeric" autocomplete="off">
+  </label>
+  <label class="row">
+    <input type="checkbox" name="restricted" value="1"> Age-restricted
+  </label>
+  <label>
+    Birth date <span class="muted">required if restricted</span>
+    <input type="date" name="birth_date">
+  </label>
+  <button type="submit">Create profile</button>
+</form>
+{{end}}

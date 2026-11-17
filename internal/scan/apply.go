@@ -108,7 +108,8 @@ func (s *Scanner) applyMetadata(ctx context.Context, tx *sql.Tx, ref editionRef,
 		}
 	}
 
-	if err := applySubjects(ctx, tx, ref.book, md, bookLocks.Has(model.FieldGenres)); err != nil {
+	if err := applySubjects(ctx, tx, ref.book, md,
+		bookLocks.Has(model.FieldGenres), s.classifier(ctx)); err != nil {
 		return 0, err
 	}
 

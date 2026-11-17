@@ -1,0 +1,49 @@
+{{define "content"}}
+<h1>{{.Source.Name}}</h1>
+
+{{if .InheritingBooks}}
+<p class="notice"><strong>{{.InheritingBooks}}</strong> book(s) here take their
+age from this source rather than their own rating. Changing the minimum age
+below changes what a restricted account can read, for all of them.</p>
+{{end}}
+
+<form method="post" action="/sources/{{.Source.ID}}" class="stack">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label>
+    Name
+    <input type="text" name="name" value="{{.Source.Name}}" required>
+  </label>
+  <label>
+    Directory
+    <input type="text" name="path" value="{{.Source.Path}}" required>
+  </label>
+  <p class="muted">Moving a library to another disk? Change the path here
+  rather than re-adding the source, and the indexed files move with it —
+  re-adding would discard everybody's progress.</p>
+
+  <label>
+    Minimum age for books here
+    <input type="number" name="default_min_age" min="0" max="21"
+           value="{{if .Source.DefaultMinAge}}{{.Source.DefaultMinAge}}{{end}}">
+  </label>
+  <p class="muted">Empty means restricted accounts can read nothing here until
+  each book is rated individually.</p>
+
+  <label class="row">
+    <input type="checkbox" name="enabled" value="1" {{if .Source.Enabled}}checked{{end}}>
+    Scan and serve this source
+  </label>
+  <label class="row">
+    <input type="checkbox" name="write_sidecars" value="1" {{if .Source.WriteSidecars}}checked{{end}}>
+    Write <code>bard.json</code> beside the media
+  </label>
+  <label class="row">
+    <input type="checkbox" name="hide_when_locked" value="1" {{if .Source.HideWhenLocked}}checked{{end}}>
+    Hide these books from accounts too young for them
+  </label>
+
+  <button type="submit">Save</button>
+</form>
+
+<p><a href="/sources">Back to sources</a></p>
+{{end}}

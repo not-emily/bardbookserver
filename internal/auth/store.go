@@ -75,6 +75,63 @@ func (s *Store) UserByUsername(ctx context.Context, username string) (*model.Use
 		`SELECT `+userColumns+` FROM users WHERE username = ?`, username))
 }
 
+// AllUsers orders owners before the profiles that hang off them, so the admin
+// list reads as the household it describes.
+func (s *Store) AllUsers(ctx context.Context) ([]*model.User, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+userColumns+` FROM users
+		 ORDER BY COALESCE(owner_id, id), managed, username`)
+	if err != nil {
+		return nil, fmt.Errorf("query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*model.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// SetFlags is the admin-editable part of an account. The username is identity
+// and a password change is its own act, so neither is here.
+func (s *Store) SetFlags(ctx context.Context, userID int64, in Flags) error {
+	if in.Restricted && in.BirthDate == nil {
+		return errors.New("auth: a restricted account needs a birth date")
+	}
+
+	var birthDate any
+	if in.BirthDate != nil {
+		birthDate = in.BirthDate.Format(model.DateLayout)
+	}
+
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE users
+		   SET display_name = ?, is_admin = ?, can_upload = ?,
+		       restricted = ?, birth_date = ?
+		 WHERE id = ?`,
+		in.DisplayName, in.IsAdmin, in.CanUpload, in.Restricted, birthDate, userID)
+	if err != nil {
+		return fmt.Errorf("update user %d: %w", userID, err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+type Flags struct {
+	DisplayName string
+	IsAdmin     bool
+	CanUpload   bool
+	Restricted  bool
+	BirthDate   *time.Time
+}
+
 type NewUser struct {
 	Username    string
 	DisplayName string

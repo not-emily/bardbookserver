@@ -1,10 +1,14 @@
 package scan
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/not-emily/bardbookserver/internal/metadata"
 	"github.com/not-emily/bardbookserver/internal/model"
+	"github.com/not-emily/bardbookserver/internal/taxonomy"
 )
 
 // The genre facet has existed since v1 phase 6 with nothing to show.
@@ -115,6 +119,45 @@ func TestALockedGenreOutranksTheProvider(t *testing.T) {
 		SELECT g.slug FROM genres g JOIN book_genres bg ON bg.genre_id = g.id`)
 	if len(genres) != 1 || genres[0] != "mythology" {
 		t.Errorf("genres are %v, want the locked mythology", genres)
+	}
+}
+
+// A mapping entered in the admin UI has to reach later scans too, or every
+// rescan would undo it.
+func TestAnAdminAliasAppliesOnARescan(t *testing.T) {
+	root := tree(t, "Brown/Red Rising.m4b")
+	p := &stubProvider{md: metadata.Metadata{
+		Title:    "Red Rising",
+		Authors:  []string{"Pierce Brown"},
+		Subjects: []string{"LitRPG"},
+	}}
+	s, d, sourceID := scannerWith(t, root, p)
+	mustScan(t, s, sourceID)
+
+	// Unmapped to begin with, so it is kept rather than lost.
+	raw := queryStrings(t, d, `SELECT subject FROM raw_subjects`)
+	if len(raw) != 1 || raw[0] != "LitRPG" {
+		t.Fatalf("raw subjects are %v", raw)
+	}
+
+	if _, err := d.Exec(
+		`INSERT INTO genre_aliases (subject, genre_slug) VALUES (?, ?)`,
+		taxonomy.Key("LitRPG"), "fantasy"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh scanner, since the aliases are read once per process.
+	s2 := sameDBScanner(t, d, p)
+	stamp := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "Brown", "Red Rising.m4b"), stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s2, sourceID)
+
+	genres := queryStrings(t, d, `
+		SELECT g.slug FROM genres g JOIN book_genres bg ON bg.genre_id = g.id`)
+	if len(genres) != 1 || genres[0] != "fantasy" {
+		t.Errorf("genres are %v, want the aliased fantasy", genres)
 	}
 }
 

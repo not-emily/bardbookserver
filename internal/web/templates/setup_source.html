@@ -5,7 +5,7 @@
 <p>A <em>source</em> is a directory Bard reads books from. It never renames or
 moves what is already there.</p>
 
-<form method="post" action="/setup/source" class="stack">
+<form method="post" action="{{.FormAction}}" class="stack">
   <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
   <label>
     Directory

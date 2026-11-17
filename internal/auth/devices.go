@@ -86,8 +86,20 @@ func (s *Store) DeviceByToken(ctx context.Context, token string) (*model.Device,
 }
 
 func (s *Store) DevicesForOwner(ctx context.Context, ownerID int64) ([]*model.Device, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+deviceColumns+` FROM devices WHERE owner_id = ? ORDER BY created_at`, ownerID)
+	return s.devices(ctx,
+		`SELECT `+deviceColumns+` FROM devices WHERE owner_id = ? ORDER BY created_at`,
+		ownerID)
+}
+
+// AllDevices is the admin view: every account's devices, newest first, which
+// is the order someone hunting a lost phone reads in.
+func (s *Store) AllDevices(ctx context.Context) ([]*model.Device, error) {
+	return s.devices(ctx,
+		`SELECT `+deviceColumns+` FROM devices ORDER BY created_at DESC`)
+}
+
+func (s *Store) devices(ctx context.Context, query string, args ...any) ([]*model.Device, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query devices: %w", err)
 	}

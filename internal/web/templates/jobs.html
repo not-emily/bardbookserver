@@ -1,0 +1,37 @@
+{{define "content"}}
+{{if .Scanning}}<meta http-equiv="refresh" content="4">{{end}}
+<h1>Jobs</h1>
+
+{{if .Scanning}}
+  <p class="notice">Work in progress. This page refreshes itself.</p>
+{{else}}
+  <p class="muted">Nothing queued.</p>
+{{end}}
+
+<dl class="counts">
+  {{range $state, $count := .JobCounts}}
+  <dt>{{$state}}</dt><dd>{{$count}}</dd>
+  {{end}}
+</dl>
+
+<h2>Library</h2>
+<dl class="counts">
+  <dt>Books</dt><dd>{{.Stats.Books}}</dd>
+  <dt>Editions</dt><dd>{{.Stats.Editions}}</dd>
+  <dt>Files</dt><dd>{{.Stats.Files}}</dd>
+</dl>
+
+<h2>Sources</h2>
+<table>
+  <thead><tr><th>Source</th><th>Last started</th><th>Last finished</th></tr></thead>
+  <tbody>
+    {{range .Sources}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{if .LastScanStartedAt}}{{.LastScanStartedAt.Format "2 Jan 15:04"}}{{else}}never{{end}}</td>
+      <td>{{if .LastScanFinishedAt}}{{.LastScanFinishedAt.Format "2 Jan 15:04"}}{{else}}never{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

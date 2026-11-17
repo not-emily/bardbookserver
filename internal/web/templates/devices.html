@@ -1,0 +1,30 @@
+{{define "content"}}
+<h1>Devices</h1>
+<p class="muted">Every signed-in device. Revoking one stops it on its next
+request, because the token is looked up each time rather than trusted.</p>
+
+<table>
+  <thead>
+    <tr><th>Device</th><th>Account</th><th>Reading as</th><th>Last seen</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Devices}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{.Owner}}</td>
+      <td>{{if ne .Active .Owner}}{{.Active}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>
+        {{if .LastSeenAt}}{{.LastSeenAt.Format "2 Jan 15:04"}}{{else}}never{{end}}
+        {{if .LastSeenIP}}<span class="muted">from {{.LastSeenIP}}</span>{{end}}
+      </td>
+      <td>
+        <form method="post" action="/devices/{{.ID}}/revoke" class="inline">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <button type="submit">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

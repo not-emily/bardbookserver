@@ -38,8 +38,23 @@ wizard shows the current mode, explains the recipes, and warns about
 `trusted_proxies`. See the decision log.
 
 ### 11.3: Sources, users, devices
+Done. A source's path is editable and the move carries the indexed files, since
+re-adding would discard every edition and the reading progress hanging off it.
+Deleting a source is deliberately not offered; disabling is the reversible
+version.
 
-### 11.4: Fix Match, the rating queue, genre mapping, job status, upload
+### 11.4a: The rating queue and genre mapping
+Done. Both consume Phase 8's output, and they share the `genre_aliases`
+foundation.
+
+### 11.4b: Fix Match and the upload form
+
+**htmx is not vendored, and will not be.** The plan assumed it, but every page
+here turned out to be a plain form, and the one thing that genuinely needs
+scripting — chunking a file with `File.slice` and hashing it with
+`crypto.subtle` — is something htmx cannot do. Avoiding the dependency keeps
+`go build` the whole story and leaves no third-party JS to track. Job and scan
+progress use a `<meta refresh>`, which costs nothing and needs no library.
 
 ## Files to Create
 
@@ -57,12 +72,7 @@ templates and assets, which is the separable half.
 
 **Internal:** Phases 8, 9, 10 for the features it exposes; Phase 2 for admin authorization.
 
-**External:** vendored htmx (one file, committed — no CDN, no Node, no build step).
-
-**htmx is not vendored yet.** 11.1 needs none of it: sign-in, sign-out and the
-dashboard are plain forms. Pulling a third-party file into the repo wants an
-explicit decision about version and provenance, so it waits until 11.4, where
-live job status is the first thing that actually needs it.
+**External:** none. htmx turned out to earn nothing — see 11.4b.
 
 ## Implementation Notes
 
@@ -83,13 +93,14 @@ Keep it plain. This UI is used at install time and then a few times a year.
 - [x] A fresh install reaches the setup wizard, creates an admin, adds a source, and completes a scan
       *(11.2: walked against the real sample library — 6 books, 7 editions, 58 files)*
 - [x] The wizard is unreachable once a user exists
-- [ ] Editing a source's `default_min_age` visibly changes which books a restricted user can read
-- [ ] A device can be revoked from the UI and stops working immediately
-- [ ] A managed user can be created with a PIN
+- [x] Editing a source's `default_min_age` visibly changes which books a restricted user can read
+      *(11.3: the edit form counts the books inheriting it before you save)*
+- [x] A device can be revoked from the UI and stops working immediately
+- [x] A managed user can be created with a PIN
 - [ ] Fix Match finds a book, lists candidates, and applying one updates metadata
 - [ ] A hand-edited field shows as locked and survives a refresh triggered from the UI
-- [ ] The rating queue bulk-confirms suggestions and leaves unconfirmed books unrated
-- [ ] Unmapped subjects are listed and can be mapped to a canonical genre
+- [x] The rating queue bulk-confirms suggestions and leaves unconfirmed books unrated
+- [x] Unmapped subjects are listed and can be mapped to a canonical genre
 - [~] Scan progress is visible while a scan runs
       *(11.2: a meta refresh while a job is queued, with the counts climbing.
       htmx polling replaces it in 11.4; per-book progress is not persisted)*

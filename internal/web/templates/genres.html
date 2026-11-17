@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1>Genres</h1>
+<p>Provider subject data is filthy, so what Bard could not place is kept rather
+than discarded. Mapping one here files every book already carrying it, and the
+rule applies to later scans too.</p>
+
+{{if .Unmapped}}
+<table>
+  <thead><tr><th>Subject</th><th>Books</th><th>Map to</th></tr></thead>
+  <tbody>
+    {{range .Unmapped}}
+    <tr>
+      <td>{{.Subject}}</td>
+      <td>{{.Books}}</td>
+      <td>
+        <form method="post" action="/genres" class="inline">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="subject" value="{{.Subject}}">
+          <select name="genre">
+            <option value="">—</option>
+            {{range $.Genres}}<option value="{{.Slug}}">{{.Name}}</option>{{end}}
+          </select>
+          <button type="submit">Map</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="muted">Nothing unmapped. Either the table covers your library or
+nothing has been scanned with a provider enabled.</p>
+{{end}}
+
+{{if .Aliases}}
+<h2>Mappings you have made</h2>
+<table>
+  <thead><tr><th>Subject</th><th>Genre</th></tr></thead>
+  <tbody>
+    {{range .Aliases}}<tr><td>{{.Subject}}</td><td>{{.Genre}}</td></tr>{{end}}
+  </tbody>
+</table>
+<p class="muted">These live in the database rather than beside your media,
+because a rule about strings is not a fact about any one book. Keep them with
+your backups.</p>
+{{end}}
+{{end}}

@@ -5,10 +5,29 @@ import (
 	"unicode"
 )
 
+// Key is the normalised form a mapping is stored under, so one entered as
+// "Fantasy Fiction" also catches "fantasy fiction".
+func Key(subject string) string { return normalize(subject) }
+
+// Classifier adds the mappings an admin entered to the built-in table. A
+// mapping they made wins, since it exists to correct what the table got wrong.
+type Classifier struct {
+	extra map[string]string
+}
+
+func NewClassifier(extra map[string]string) Classifier {
+	return Classifier{extra: extra}
+}
+
+// Classify with no admin mappings, for callers that have none.
+func Classify(subjects []string) (slugs, raw []string) {
+	return Classifier{}.Classify(subjects)
+}
+
 // Classify sorts subject strings into canonical genre slugs and the rest. The
 // rest is returned rather than discarded, so a gap in the alias table degrades
 // the facet instead of losing data.
-func Classify(subjects []string) (slugs, raw []string) {
+func (c Classifier) Classify(subjects []string) (slugs, raw []string) {
 	seenSlug := map[string]bool{}
 	seenRaw := map[string]bool{}
 
@@ -18,7 +37,7 @@ func Classify(subjects []string) (slugs, raw []string) {
 			if noise[key] {
 				continue
 			}
-			slug, ok := lookup(key)
+			slug, ok := c.lookup(key)
 			if !ok {
 				continue
 			}
@@ -56,7 +75,12 @@ func parts(subject string) []string {
 // lookup tries the alias table, then the same string without the genre words
 // providers tack on. "science fiction" is an alias, so it is matched before
 // anything can strip "fiction" off it.
-func lookup(key string) (string, bool) {
+func (c Classifier) lookup(key string) (string, bool) {
+	if slug, ok := c.extra[key]; ok {
+		if _, known := BySlug(slug); known {
+			return slug, true
+		}
+	}
 	if slug, ok := aliases[key]; ok {
 		return slug, true
 	}
@@ -64,10 +88,17 @@ func lookup(key string) (string, bool) {
 	for _, suffix := range []string{
 		" fiction", " nonfiction", " stories", " novels", " novel", " books",
 	} {
-		if stripped, found := strings.CutSuffix(key, suffix); found && stripped != "" {
-			if slug, ok := aliases[stripped]; ok {
+		stripped, found := strings.CutSuffix(key, suffix)
+		if !found || stripped == "" {
+			continue
+		}
+		if slug, ok := c.extra[stripped]; ok {
+			if _, known := BySlug(slug); known {
 				return slug, true
 			}
+		}
+		if slug, ok := aliases[stripped]; ok {
+			return slug, true
 		}
 	}
 	return "", false

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/not-emily/bardbookserver/internal/db"
@@ -32,6 +33,9 @@ type Scanner struct {
 	covers    *media.Cache
 	providers *provider.Registry
 	logger    *slog.Logger
+
+	once    sync.Once
+	aliases map[string]string
 }
 
 // A nil registry makes no outbound request, which is the default.

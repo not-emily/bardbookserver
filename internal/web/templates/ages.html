@@ -1,0 +1,45 @@
+{{define "content"}}
+<h1>Ages</h1>
+<p>These books have no age of their own. A suggestion is a provider's guess —
+it is never applied until you confirm it, because a wrong rating applied
+unseen lets a book through rather than holding it back.</p>
+
+{{if .Unrated}}
+<form method="post" action="/ages">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <table>
+    <thead>
+      <tr><th>Confirm</th><th>Book</th><th>Age</th><th>Reads as</th></tr>
+    </thead>
+    <tbody>
+      {{range .Unrated}}
+      <tr>
+        <td><input type="checkbox" name="confirm" value="{{.ID}}"
+                   {{if .Suggested}}checked{{end}}></td>
+        <td>
+          {{.Title}}
+          {{if .Authors}}<span class="muted">{{.Authors}}</span>{{end}}
+        </td>
+        <td>
+          <input type="number" name="age_{{.ID}}" min="0" max="21"
+                 value="{{if .Suggested}}{{.Suggested}}{{end}}">
+        </td>
+        <td>
+          {{if .Suggested}}
+            <span class="muted">suggested {{.Suggested}}</span>
+          {{else if .Inherited}}
+            <span class="muted">inherits {{.Inherited}} from its source</span>
+          {{else}}
+            <span class="muted">unrated — restricted accounts cannot read it</span>
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  <button type="submit">Confirm the ticked rows</button>
+</form>
+{{else}}
+<p class="muted">Nothing waiting.</p>
+{{end}}
+{{end}}

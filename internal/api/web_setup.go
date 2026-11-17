@@ -117,9 +117,12 @@ func (s *Server) handleSetupSourcePage(w http.ResponseWriter, r *http.Request) {
 	s.renderSourceForm(w, r, http.StatusOK, pageData{})
 }
 
+// The same form is the wizard's second step and the plain add-source page, so
+// its action follows whichever route reached it.
 func (s *Server) renderSourceForm(w http.ResponseWriter, r *http.Request, status int, from pageData) {
 	data := s.page(r, "Add a source")
 	data.Error, data.Notice = from.Error, from.Notice
+	data.FormAction = r.URL.Path
 	s.render(w, status, "setup_source.html", data)
 }
 
@@ -162,7 +165,14 @@ func (s *Server) handleSetupSourceSubmit(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.logger.Info("source added", "source", source.ID, "path", source.Path)
-	http.Redirect(w, r, "/setup/scan", http.StatusSeeOther)
+
+	// Which route was taken says whether this is the wizard or an admin adding
+	// a second directory; setup is complete either way by now.
+	if isSetupPath(r) {
+		http.Redirect(w, r, "/setup/scan", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/sources?notice=Source+added.", http.StatusSeeOther)
 }
 
 // describePath returns why a directory will not do, in the terms someone
