@@ -8,17 +8,19 @@ Latest Weekly Report: [weekly-2026-W46.md](../docs/reports/weekly-2026-W46.md)
 Last Updated: 2026-11-16
 
 ## Current Focus
-Phase 11 is split into four sub-phases, because nine deliverables is more than
-one session. 11.1 is done: the admin UI has a shell, cookie sessions with CSRF,
-an admin gate, and a setup gate that is bound to there being no users at all.
+Phase 11 runs in four sub-phases. 11.1 and 11.2 are done: an install now goes
+from an empty database to an indexed library entirely in a browser, which was
+the point of the phase. Walked against the real sample library.
 
 ## Active Tasks
 - [DONE] Phases 8, 9, 10
 - [IN PROGRESS] Phase 11: Web admin UI
   - ✅ 11.1: cookie sessions with CSRF, `embed.FS`, layout, sign-in/out, the
     admin gate, the setup gate, and the first-admin form
-  - ⏭ 11.2: the setup wizard proper — first source, TLS mode, first scan
-  - ⏭ 11.3: sources, users, devices
+  - ✅ 11.2: the wizard's remaining steps — first source with honest path
+    errors, first scan with live counts, and TLS reported rather than written
+  - ⏭ 11.3: sources, users, devices. The source form already doubles as the
+    add-source page, so 11.3 starts from a list and an edit form
   - ⏭ 11.4: Fix Match, rating queue, genre mapping, job status, upload form.
     htmx gets vendored here, where live job status first needs it
 - [LATER] Phase 12: packaging & release
@@ -95,8 +97,25 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
+- [2026-11-17] Phase 11.2: the setup wizard (uncommitted)
+  - Setup state is derived, not stored, so a half-finished wizard resumes where
+    it stopped and no flag can be reset by a bad restore
+  - The scan is the last page but not a gate: gating on it would trap an
+    install that wants to scan later, and a "skip" button is the flag again
+  - Path errors are in the terms of someone typing a path, and readability is
+    probed rather than inferred from a mode bit
+  - TLS is reported rather than written: a form that rewrites `bard.yml`
+    destroys the comments YAML was chosen for. `trusted_proxies` gets its
+    warning in front of whoever is installing
+  - Found while testing: the step redirect ran before authentication, so an
+    unauthenticated visitor bounced through a step to reach the sign-in page.
+    The three cases are now ordered explicitly
+  - Walked against the real sample library: admin, a refused bad path, the
+    source, the scan, 6 books / 7 editions / 58 files, refresh stopping on its
+    own, and the wizard closed behind it
+  - 458 tests pass, race-clean
 - [2026-11-16] Phase 11.1: the admin UI shell and its authentication
-  (uncommitted)
+  (committed, 8a97315)
   - A browser is a device, so there is one revocation surface and a session
     shows up in the authorized list
   - One rule carries the safety: cookie auth needs CSRF on a non-GET, Bearer
@@ -244,18 +263,19 @@ Week 47 is still in progress, so the entries below stay until it closes and
   - 301 tests pass, race-clean
 
 ## Next Session
-Phase 11.2: the setup wizard proper — add the first source, choose TLS mode,
-run the first scan, all from the browser.
+Phase 11.3: sources, users and devices.
 
-What is ready: `scan.CreateSource` and `scan.EnqueueSource` are what the wizard
-calls, and the shell, the CSRF plumbing and the "no users yet" gate all exist.
-The wizard currently ends at "admin created and signed in", so 11.2 extends it
-rather than starting it.
+What is ready: `setup_source.html` already renders as a plain add-source page
+once setup is complete, and `scan.AllSources` feeds the table the scan step
+uses. `describePath` and `optionalAge` are reusable for an edit form.
+`/api/v1/devices` and its revoke already exist and are tested, so the devices
+page is a table over data that works.
 
-What 11.2 has to decide: whether the wizard is one page with several steps or
-several pages with progress, and what it does when the path typed in does not
-exist or is not readable — the upload code already learned that a mode bit is
-not enough and a probe write is the honest check.
+What 11.3 has to decide: editing a source's `default_min_age` has visible
+consequences for every book inheriting it — the plan asks for that to be shown
+rather than silent, so the edit form wants a "this affects N books" line
+before saving. Also whether changing a path is allowed at all: it would
+orphan every indexed file under the old one.
 
 Carried for 11.4: unlocking a field has to drop it from `locked` in the sidecar
 too, or the old value keeps outranking the file forever.

@@ -1,0 +1,37 @@
+{{define "content"}}
+{{if .Wizard}}<p class="muted">Step 2 of 3</p>{{end}}
+<h1>Add a source</h1>
+
+<p>A <em>source</em> is a directory Bard reads books from. It never renames or
+moves what is already there.</p>
+
+<form method="post" action="/setup/source" class="stack">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label>
+    Directory
+    <input type="text" name="path" placeholder="/srv/books" autofocus required>
+  </label>
+  <label>
+    Name
+    <input type="text" name="name" placeholder="Books">
+  </label>
+  <label>
+    Minimum age for books here
+    <input type="number" name="default_min_age" min="0" max="21" placeholder="0">
+  </label>
+  <p class="muted">Books inherit this unless rated individually. Leaving it
+  empty means restricted accounts cannot read anything here until each book is
+  rated.</p>
+
+  <label class="row">
+    <input type="checkbox" name="write_sidecars" value="1" checked>
+    Write <code>bard.json</code> beside the media
+  </label>
+  <label class="row">
+    <input type="checkbox" name="hide_when_locked" value="1">
+    Hide these books from accounts too young for them
+  </label>
+
+  <button type="submit">Add source</button>
+</form>
+{{end}}

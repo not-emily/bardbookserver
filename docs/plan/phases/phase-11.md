@@ -30,7 +30,12 @@ Cookie sessions with CSRF, `embed.FS`, layout, sign-in, the admin gate, and the
 setup gate. Done.
 
 ### 11.2: The setup wizard
-The first source, TLS mode, and the first scan.
+The first source and the first scan. Done.
+
+**TLS is reported, not written.** A form that rewrites `bard.yml` destroys the
+comments YAML was chosen for, and the file may be read-only or absent. The
+wizard shows the current mode, explains the recipes, and warns about
+`trusted_proxies`. See the decision log.
 
 ### 11.3: Sources, users, devices
 
@@ -75,8 +80,8 @@ Keep it plain. This UI is used at install time and then a few times a year.
 
 ## Validation
 
-- [~] A fresh install reaches the setup wizard, creates an admin, adds a source, and completes a scan
-      *(11.1: admin created and signed in; the source and the scan are 11.2)*
+- [x] A fresh install reaches the setup wizard, creates an admin, adds a source, and completes a scan
+      *(11.2: walked against the real sample library — 6 books, 7 editions, 58 files)*
 - [x] The wizard is unreachable once a user exists
 - [ ] Editing a source's `default_min_age` visibly changes which books a restricted user can read
 - [ ] A device can be revoked from the UI and stops working immediately
@@ -85,6 +90,8 @@ Keep it plain. This UI is used at install time and then a few times a year.
 - [ ] A hand-edited field shows as locked and survives a refresh triggered from the UI
 - [ ] The rating queue bulk-confirms suggestions and leaves unconfirmed books unrated
 - [ ] Unmapped subjects are listed and can be mapped to a canonical genre
-- [ ] Scan progress is visible while a scan runs
+- [~] Scan progress is visible while a scan runs
+      *(11.2: a meta refresh while a job is queued, with the counts climbing.
+      htmx polling replaces it in 11.4; per-book progress is not persisted)*
 - [x] A non-admin session cannot reach any admin page
 - [x] The UI works with no outbound network access

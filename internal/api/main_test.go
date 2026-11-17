@@ -79,6 +79,14 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("create test device: %v", err)
 	}
 
+	// A configured install: a user and a source, so the setup wizard is behind
+	// us. The tests that want a fresh one empty these tables.
+	if _, err := database.Exec(
+		`INSERT INTO sources (name, path, default_min_age) VALUES (?, ?, 0)`,
+		"Configured", t.TempDir()); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+
 	return &harness{
 		t:       t,
 		server:  server,

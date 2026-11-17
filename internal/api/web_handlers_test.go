@@ -61,6 +61,13 @@ func (h *harness) signIn(username, password string) (token, csrf string) {
 
 const adminPassword = "correct horse battery staple"
 
+// freshInstall empties what the setup wizard exists to fill.
+func (h *harness) freshInstall() {
+	h.t.Helper()
+	h.exec(`DELETE FROM sources`)
+	h.exec(`DELETE FROM users`)
+}
+
 func hashOf(token string) string { return auth.HashToken(token) }
 
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
@@ -290,7 +297,7 @@ func TestTheSetupWizardIsReachableOnlyWithNoUsers(t *testing.T) {
 // reset.
 func TestAFreshInstallReachesTheWizardAndCreatesAnAdmin(t *testing.T) {
 	h := newHarness(t)
-	h.exec(`DELETE FROM users`)
+	h.freshInstall()
 
 	res := h.serve(httptest.NewRequest(http.MethodGet, "/", nil))
 	if loc := res.Header().Get("Location"); loc != "/setup" {
@@ -311,6 +318,11 @@ func TestAFreshInstallReachesTheWizardAndCreatesAnAdmin(t *testing.T) {
 		t.Fatalf("creating the admin returned %d: %s", created.Code, created.Body)
 	}
 
+	// Straight on to the next step rather than a dashboard with no library.
+	if loc := created.Header().Get("Location"); loc != "/setup/source" {
+		t.Errorf("after the admin, went to %q, want /setup/source", loc)
+	}
+
 	var token string
 	for _, c := range created.Result().Cookies() {
 		if c.Name == SessionCookie {
@@ -319,9 +331,6 @@ func TestAFreshInstallReachesTheWizardAndCreatesAnAdmin(t *testing.T) {
 	}
 	if token == "" {
 		t.Fatal("the wizard did not sign the new admin in")
-	}
-	if res := h.cookieGet("/", token); res.Code != http.StatusOK {
-		t.Errorf("the new admin cannot reach the dashboard: %d", res.Code)
 	}
 
 	// And the door closes behind it.
@@ -333,7 +342,7 @@ func TestAFreshInstallReachesTheWizardAndCreatesAnAdmin(t *testing.T) {
 
 func TestTheWizardRefusesAWeakPassword(t *testing.T) {
 	h := newHarness(t)
-	h.exec(`DELETE FROM users`)
+	h.freshInstall()
 
 	res := h.form(http.MethodPost, "/setup", "", url.Values{
 		"username": {"emily"}, "password": {"short"},

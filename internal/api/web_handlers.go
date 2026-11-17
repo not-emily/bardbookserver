@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/not-emily/bardbookserver/internal/auth"
 	"github.com/not-emily/bardbookserver/internal/model"
 )
 
@@ -19,6 +18,14 @@ type pageData struct {
 	Error     string
 	Notice    string
 	Stats     libraryStats
+
+	// Wizard is set while setup is incomplete, so a page can read as a step
+	// during setup and as a plain admin page afterwards.
+	Wizard   bool
+	Sources  []*model.Source
+	Scanning bool
+	BindAddr string
+	TLSMode  string
 }
 
 type libraryStats struct {
@@ -26,7 +33,11 @@ type libraryStats struct {
 }
 
 func (s *Server) page(r *http.Request, title string) pageData {
-	data := pageData{Title: title, Version: s.version}
+	data := pageData{
+		Title:   title,
+		Version: s.version,
+		Wizard:  s.setupStep(r.Context()) != "",
+	}
 	if user := CurrentUser(r.Context()); user != nil {
 		data.User = user
 	}
@@ -183,12 +194,16 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 
 // requireWebAuth sends an unauthenticated browser to the sign-in page rather
 // than answering a navigation with JSON.
+//
+// The order matters: with no users at all there is nobody to sign in as, so
+// that case outranks the sign-in page. Every later step needs an account, so
+// resuming the wizard happens after authentication.
 func (s *Server) requireWebAuth(next http.Handler) http.Handler {
-	authed := s.requireAuth(s.requireAdmin(next))
+	authed := s.requireAuth(s.requireAdmin(s.resumeSetup(next)))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.needsSetup(r.Context()) {
-			http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		if s.needsSetup(r.Context()) && !isSetupPath(r) {
+			http.Redirect(w, r, stepAdmin, http.StatusSeeOther)
 			return
 		}
 		if cookieToken(r) == "" && bearerToken(r) == "" {
@@ -199,70 +214,21 @@ func (s *Server) requireWebAuth(next http.Handler) http.Handler {
 	})
 }
 
-// needsSetup is bound to there being no users at all, not a config flag a bad
-// restore could reset.
-func (s *Server) needsSetup(ctx context.Context) bool {
-	var users int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&users); err != nil {
-		s.logger.Error("count users", "error", err)
-		return false
-	}
-	return users == 0
-}
-
-func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
-	if !s.needsSetup(r.Context()) {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	s.render(w, http.StatusOK, "setup.html", s.page(r, "Welcome"))
-}
-
-func (s *Server) handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
-	if !s.needsSetup(r.Context()) {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	username := strings.TrimSpace(r.PostFormValue("username"))
-	password := r.PostFormValue("password")
-
-	fail := func(message string) {
-		data := s.page(r, "Welcome")
-		data.Error = message
-		s.render(w, http.StatusBadRequest, "setup.html", data)
-	}
-	switch {
-	case username == "":
-		fail("A username is required.")
-		return
-	case len(password) < 8:
-		fail("The password must be at least 8 characters.")
-		return
-	}
-
-	user, err := s.store.CreateUser(r.Context(), auth.NewUser{
-		Username:    username,
-		DisplayName: strings.TrimSpace(r.PostFormValue("display_name")),
-		Password:    password,
-		IsAdmin:     true,
+// resumeSetup steers a navigation to the step an install stopped at. Only a
+// GET: redirecting a form submission would drop what it carried.
+func (s *Server) resumeSetup(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && !isSetupPath(r) {
+			if step := s.setupStep(r.Context()); step != "" {
+				http.Redirect(w, r, step, http.StatusSeeOther)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
-	if err != nil {
-		s.logger.Error("create first admin", "error", err)
-		fail("Could not create that account.")
-		return
-	}
+}
 
-	device, token, err := s.store.CreateDevice(r.Context(), user.ID, browserName(r))
-	if err != nil {
-		s.logger.Error("create browser device", "err", err, "user", user.ID)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	s.logger.Info("first administrator created",
-		"user", user.Username, "device", device.ID)
-
-	SetSessionCookie(w, r, token)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+// The setup pages are exempt, or redirecting to them would loop.
+func isSetupPath(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/setup")
 }

@@ -145,6 +145,10 @@ func (s *Server) handler() http.Handler {
 	pages := http.NewServeMux()
 	pages.HandleFunc("GET /{$}", s.handleDashboard)
 	pages.HandleFunc("POST /logout", s.handleWebLogout)
+	pages.HandleFunc("GET /setup/source", s.handleSetupSourcePage)
+	pages.HandleFunc("POST /setup/source", s.handleSetupSourceSubmit)
+	pages.HandleFunc("GET /setup/scan", s.handleSetupScanPage)
+	pages.HandleFunc("POST /setup/scan", s.handleSetupScanStart)
 	mux.Handle("/", s.requireWebAuth(pages))
 
 	resolver := proxyResolver{trusted: s.cfg.TrustedPrefixes()}

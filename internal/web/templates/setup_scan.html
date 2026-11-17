@@ -1,0 +1,49 @@
+{{define "content"}}
+{{if .Scanning}}<meta http-equiv="refresh" content="4">{{end}}
+<p class="muted">Step 3 of 3</p>
+<h1>First scan</h1>
+
+<table>
+  <thead><tr><th>Source</th><th>Directory</th><th>Last scanned</th></tr></thead>
+  <tbody>
+    {{range .Sources}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td><code>{{.Path}}</code></td>
+      <td>{{if .LastScanFinishedAt}}{{.LastScanFinishedAt.Format "2 Jan 15:04"}}{{else}}never{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+
+{{if .Scanning}}
+  <p class="notice">Scanning. This page refreshes itself; counts climb as books
+  are indexed.</p>
+{{else}}
+  <form method="post" action="/setup/scan" class="inline">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit">Scan now</button>
+  </form>
+{{end}}
+
+<dl class="counts">
+  <dt>Books</dt><dd>{{.Stats.Books}}</dd>
+  <dt>Editions</dt><dd>{{.Stats.Editions}}</dd>
+  <dt>Files</dt><dd>{{.Stats.Files}}</dd>
+</dl>
+
+<h2>Reaching Bard from outside</h2>
+<p>Bard is listening on <code>{{.BindAddr}}</code> with
+<code>tls.mode: {{.TLSMode}}</code>.</p>
+<p class="muted">Remote access is a deployment choice rather than a setting
+here: a Cloudflare Tunnel or a reverse proxy terminates TLS in front of Bard,
+and only a direct port-forward wants Bard's own certificates. Changing it means
+editing <code>bard.yml</code> and restarting, so this page reports the setting
+rather than rewriting a file you may have commented.</p>
+<p><strong>If anything sits in front of Bard, set
+<code>trusted_proxies</code>.</strong> Too permissive lets a caller forge its
+address past login rate limiting; too strict collapses every client into one
+bucket.</p>
+
+<p><a href="/">Finish</a></p>
+{{end}}

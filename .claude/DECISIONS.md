@@ -3,6 +3,62 @@
 Decisions made during implementation, including those that changed or went
 beyond what was planned.
 
+## 2026-11-17: The wizard reports TLS rather than writing the config
+
+**Decision:** The setup wizard's last step shows `bind_addr`, `tls.mode` and a
+`trusted_proxies` warning, and explains the three deployment recipes. It does
+not write `bard.yml`.
+
+**Rationale:** The plan lists "choose TLS mode" as a wizard deliverable, and a
+web form that rewrites the config file is the obvious reading. But YAML was
+chosen in the first place *because it supports comments*, and round-tripping
+through yaml.v3 destroys them — so the wizard would silently eat a deployment's
+own notes. The file may also be root-owned, read-only, or absent entirely with
+defaults in use, and the change needs a restart to take effect regardless.
+
+Telling the truth is more useful than a form that half works: every documented
+recipe except the direct port-forward terminates TLS in front of Bard, so the
+answer is usually "nothing to set here, and mind `trusted_proxies`".
+
+**Alternatives Considered:** Writing the file and prompting for a restart,
+which destroys comments and fails on a read-only config. A separate settings
+table shadowing the config, which gives two places a value can come from and
+no way to tell which won.
+
+**Impact:** `trusted_proxies` gets its warning in front of whoever is
+installing, which is the fourth place that setting has turned out to be
+load-bearing. Phase 12's deploy recipes are where the detail belongs.
+
+---
+
+## 2026-11-17: Setup state is derived, and the scan is not a step
+
+**Decision:** `setupStep` returns the admin step when no users exist, the
+source step when no sources exist, and nothing otherwise. The first scan is the
+wizard's last page but not a gate: adding a source completes setup.
+
+**Rationale:** Deriving it means a half-finished wizard resumes where it
+actually stopped, with no flag for a bad restore to reset — the same reasoning
+that already binds the admin gate to counting users.
+
+Gating on the scan would be the mistake. An install that chooses to scan later,
+or whose first scan fails on a bad path, would be held in the wizard with no
+way out, and a "skip" button would just be the flag again under another name. A
+source is the last thing setup genuinely needs.
+
+**Alternatives Considered:** A `setup_complete` flag, which is the thing the
+plan already warns about for the admin gate. Gating on a finished scan, which
+traps an install that does not want one yet.
+
+**Impact:** The middleware order is load-bearing and commented as such: with no
+users there is nobody to sign in as, so that outranks the sign-in redirect;
+every later step needs an account, so resuming happens after authentication.
+Resuming only redirects a GET, since steering a form submission would drop what
+it carried. The source form doubles as the plain add-source page once setup is
+complete, which v1 phase 11.3 gets for free.
+
+---
+
 ## 2026-11-16: A browser is a device, and cookie auth is the only thing CSRF guards
 
 **Decision:** The admin UI signs in by form and receives its device token in an
