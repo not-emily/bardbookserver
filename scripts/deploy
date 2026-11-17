@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Build bard for a remote host and ship it there.
+#
+#   scripts/deploy bard-server --install    # first install
+#   scripts/deploy bard-server --restart    # upgrade the binary in place
+#   scripts/deploy user@10.0.0.5            # copy only, install by hand
+#
+# The host needs no Go, no git and no network access to GitHub: everything is
+# built here and copied over.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# shellcheck source=scripts/version
+source scripts/version
+
+# Overridable because the staged files have to be executable, and a hardened
+# host may mount /tmp noexec.
+REMOTE_DIR=${BARD_DEPLOY_DIR:-/tmp/bard-deploy}
+
+say() { printf '\033[0;32m%s\033[0m\n' "$*"; }
+step() { printf '\033[0;34m%s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m%s\033[0m\n' "$*" >&2; }
+die() {
+	printf '\033[0;31mdeploy: %s\033[0m\n' "$*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<'USAGE'
+Usage: scripts/deploy <server> [options]
+
+  server            SSH host, as ssh would take it (bard-server, user@host)
+
+Options:
+  --install         Run the installer on the host after copying
+  --restart         Replace the binary and restart the service
+  --arch=ARCH       amd64 or arm64; detected over SSH when omitted
+  -h, --help        This
+
+Neither --install nor --restart just copies the files and tells you what to run.
+USAGE
+	exit 1
+}
+
+SERVER=
+TARGET_ARCH=
+DO_INSTALL=false
+DO_RESTART=false
+
+while [[ $# -gt 0 ]]; do
+	case $1 in
+	--install) DO_INSTALL=true ;;
+	--restart) DO_RESTART=true ;;
+	--arch=*) TARGET_ARCH=${1#*=} ;;
+	-h | --help) usage ;;
+	-*) die "unknown option $1" ;;
+	*)
+		[[ -z $SERVER ]] || die "unexpected argument $1"
+		SERVER=$1
+		;;
+	esac
+	shift
+done
+
+[[ -n $SERVER ]] || usage
+
+step "=== Deploying bard $(bard_version) to $SERVER ==="
+echo
+
+if [[ -z $TARGET_ARCH ]]; then
+	say "Detecting the remote system..."
+	remote=$(ssh "$SERVER" "uname -s -m") || die "cannot ssh to $SERVER"
+
+	case $remote in
+	Linux*) ;;
+	# The packaging is a systemd unit, so there is nothing to install on a
+	# host that does not have one.
+	*) die "$SERVER reports '$remote'; bard is packaged for Linux only" ;;
+	esac
+
+	case $remote in
+	*x86_64*) TARGET_ARCH=amd64 ;;
+	*aarch64* | *arm64*) TARGET_ARCH=arm64 ;;
+	*) die "cannot tell the architecture from '$remote'; pass --arch=" ;;
+	esac
+fi
+echo "  Target: linux/$TARGET_ARCH"
+echo
+
+say "Building..."
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+
+CGO_ENABLED=0 GOOS=linux GOARCH="$TARGET_ARCH" \
+	go build -trimpath -ldflags "$(ldflags)" -o "$STAGE/bard" ./cmd/bard
+
+# The installer finds its unit file beside itself, which is the same layout a
+# release archive unpacks to.
+cp scripts/install "$STAGE/install"
+cp packaging/systemd/bard.service "$STAGE/bard.service"
+echo "  $(du -h "$STAGE/bard" | cut -f1) binary"
+echo
+
+say "Copying to $SERVER:$REMOTE_DIR/..."
+ssh "$SERVER" "mkdir -p $REMOTE_DIR"
+scp -q "$STAGE/bard" "$STAGE/install" "$STAGE/bard.service" "$SERVER:$REMOTE_DIR/"
+ssh "$SERVER" "chmod +x $REMOTE_DIR/bard $REMOTE_DIR/install"
+echo "  ✓ bard"
+echo "  ✓ install"
+echo "  ✓ bard.service"
+echo
+
+if [[ $DO_INSTALL == true ]]; then
+	say "Running the installer on $SERVER (needs sudo)..."
+	# -t for a tty, or sudo cannot prompt for a password.
+	ssh -t "$SERVER" "cd $REMOTE_DIR && sudo ./install"
+	echo
+	step "=== Installed ==="
+	cat <<NEXT
+
+bard is bound to 127.0.0.1:2273 on $SERVER, so nothing else can reach it yet.
+
+CREATE THE FIRST ADMIN. The setup wizard is a web page, and a headless server
+has no browser, so either forward the port to this machine:
+
+    ssh -L 2273:127.0.0.1:2273 $SERVER
+    # then open http://localhost:2273/ here
+
+or create the account over SSH instead:
+
+    ssh -t $SERVER "sudo -u bard /usr/local/bin/bard user add --admin --username <you>"
+
+Run bard's CLI as the bard user, never as root: root would leave the database
+and its write-ahead log owned by root, and the service could not write to them.
+
+THEN point it at your books and scan:
+
+    ssh -t $SERVER "sudo -u bard /usr/local/bin/bard source add \\
+        --name Books --path /srv/books --min-age 0"
+    ssh -t $SERVER "sudo -u bard /usr/local/bin/bard scan"
+
+The bard account must be able to read that path. Uploads also need it listed in
+ReadWritePaths= in /etc/systemd/system/bard.service, because the unit runs with
+a read-only filesystem; scanning works without that, only uploading fails.
+
+SET trusted_proxies in /etc/bard/bard.yml before exposing it. docs/deploy/ has
+a recipe per transport, and /diagnostics will tell you whether you got it right.
+NEXT
+elif [[ $DO_RESTART == true ]]; then
+	say "Replacing the binary and restarting..."
+	ssh -t "$SERVER" "sudo install -m 0755 $REMOTE_DIR/bard /usr/local/bin/bard && sudo systemctl restart bard"
+	sleep 1
+	ssh "$SERVER" "systemctl is-active --quiet bard" ||
+		die "bard did not stay running; check: ssh $SERVER journalctl -u bard -n 30"
+	version=$(ssh "$SERVER" "/usr/local/bin/bard version")
+	say "Restarted, now running $version."
+else
+	cat <<NEXT
+Copied, nothing installed. On $SERVER:
+
+  First install:   cd $REMOTE_DIR && sudo ./install
+  Upgrade:         sudo install -m 0755 $REMOTE_DIR/bard /usr/local/bin/bard
+                   sudo systemctl restart bard
+
+Or re-run with --install or --restart to do it from here.
+NEXT
+fi

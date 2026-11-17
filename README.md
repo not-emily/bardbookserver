@@ -57,12 +57,33 @@ cd bardbookserver
 sudo ./scripts/install
 ```
 
+Or push it to a server from a machine that has the repo. The host needs no Go,
+no git and no access to GitHub, because everything is built here:
+
+```
+scripts/deploy bard-server --install    # detects the arch, builds, installs
+scripts/deploy bard-server --restart    # later, to upgrade the binary
+```
+
 Either way you get a `bard` system account, `/etc/bard/bard.yml`,
 `/var/lib/bard`, and a running service. Re-running upgrades the binary and
 leaves your config and data alone.
 
 Then open <http://127.0.0.1:2273/> and create the first admin account. The setup
 wizard takes you through adding a source and running the first scan.
+
+**On a headless server** there is no browser at that address, so either forward
+the port — `ssh -L 2273:127.0.0.1:2273 your-server` — and use the wizard from
+your own machine, or skip it and create the account over SSH:
+
+```
+sudo -u bard bard user add --admin --username you
+sudo -u bard bard source add --name Books --path /srv/books --min-age 0
+sudo -u bard bard scan
+```
+
+Run the CLI as the `bard` user rather than root. As root the database and its
+write-ahead log end up root-owned, and the service cannot write to them.
 
 There is also a [Docker image](docs/deploy/docker.md), with caveats.
 
