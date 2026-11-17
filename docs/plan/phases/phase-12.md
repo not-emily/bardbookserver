@@ -50,8 +50,22 @@ own successor: the dedupe index covers `running`, so it would collide with
 itself.
 
 ### 12.2: Build, install and CI
-`scripts/build`, `scripts/release`, the systemd unit, the install script, and
-the Actions workflows.
+Done. `scripts/build`, `scripts/release`, `scripts/install`, the systemd unit,
+the Docker image, and the two workflows.
+
+`scripts/release` fails the build if `file` reports a dynamically linked
+artefact, because nothing else in the build would say so and a dynamic binary
+defeats the point of shipping one file.
+
+**The container needed the data directory to exist in the image**, owned by the
+runtime uid. Docker seeds a fresh named volume from the image including its
+ownership, so without that the volume arrives root-owned and the server cannot
+open its own database.
+
+**Docker's NAT is itself a `trusted_proxies` trap.** Every request through a
+published port arrives from the bridge gateway, so the real client address is
+gone before Bard sees it. Verified: a request to the container logged
+`client=172.17.0.1`.
 
 ### 12.3: TLS and diagnostics
 `tls: auto` via autocert, and the `trusted_proxies` diagnostics page.
@@ -101,11 +115,26 @@ README must cover: what Bard is, supported formats, install, point-at-a-director
 
 ## Validation
 
-- [ ] A tagged release produces static amd64 and arm64 binaries
-- [ ] The arm64 binary runs on arm64 hardware or under emulation
-- [ ] `ldd` reports a static binary, or the equivalent check passes
-- [ ] The install script produces a running service on a clean machine
-- [ ] The Docker image starts, persists state across restarts, and serves the UI
+- [~] A tagged release produces static amd64 and arm64 binaries
+      *(12.2: `scripts/release` verified locally and the workflow calls that
+      same script, but no tag has been pushed through Actions yet)*
+- [x] The arm64 binary runs on arm64 hardware or under emulation
+      *(12.2: under qemu-aarch64 the arm64 build applied all 16 migrations,
+      hashed with Argon2id, scanned the real library to the same 7 editions /
+      58 files / 7 covers as amd64, and matched an FTS5 search — which is the
+      pure-Go SQLite claim in Decision 1 actually tested)*
+- [x] `ldd` reports a static binary, or the equivalent check passes
+      *(12.2: "not a dynamic executable" for both, and `release` now refuses
+      to ship one that is)*
+- [~] The install script produces a running service on a clean machine
+      *(12.2: run in a clean Debian container — creates the `bard` system
+      account, 0640 root:bard config, 0750 data dir, and the account with no
+      supplementary groups ran the unit's exact ExecStart and served
+      `/healthz`. systemd itself was stubbed, so the unit is verified only by
+      `systemd-analyze verify`)*
+- [x] The Docker image starts, persists state across restarts, and serves the UI
+      *(12.2: 23MB scratch image; an admin created through the UI survived a
+      container restart)*
 - [ ] Following the Cloudflare Tunnel recipe verbatim yields a working remote connection
 - [ ] After following it, two devices on different networks are rate-limited independently
 - [ ] `tls: auto` obtains a certificate against the Let's Encrypt staging environment
@@ -115,4 +144,6 @@ README must cover: what Bard is, supported formats, install, point-at-a-director
 - [x] `bard export` output restores on a different machine with manual corrections intact
       *(12.1: 6 books, 1 account, 14 covers; a hand-set age survived and the
       covers served from the restored cache)*
-- [ ] CI runs tests on every push and blocks a release on failure
+- [~] CI runs tests on every push and blocks a release on failure
+      *(12.2: both workflows written; `release.yml` runs the suite before it
+      builds. Neither has run, since there is no remote yet)*

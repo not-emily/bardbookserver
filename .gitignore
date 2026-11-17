@@ -2,6 +2,8 @@
 /dist/
 /bard-data/
 bard.yml
+# The packaged examples are not somebody's local config.
+!packaging/**/bard.yml
 *.db
 *.db-wal
 *.db-shm

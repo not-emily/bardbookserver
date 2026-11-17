@@ -22,8 +22,8 @@ Three shaping decisions, taken 2026-11-17:
 ## Active Tasks
 - [DONE] Phases 8, 9, 10, 11 (all four sub-phases)
 - [DONE] Phase 12.1: snapshots, export and import
-- [NEXT] Phase 12.2: `scripts/build` and `scripts/release`, the systemd unit,
-  the install script, and the CI and release workflows
+- [DONE] Phase 12.2: build and release scripts, systemd unit, installer,
+  Docker image, CI and release workflows
 - [NEXT] Phase 12.3: `tls: auto` via autocert, and the diagnostics page
 - [NEXT] Phase 12.4: README, the three deploy recipes, SECURITY, CHANGELOG
 
@@ -103,6 +103,23 @@ Nothing is blocked. These are known limitations carried forward.
   `ffprobe` is the documented fallback, and nothing calls it yet.
 
 ## Completed This Week
+- [2026-11-17] Phase 12.2: build, install and CI
+  - `scripts/build`, `scripts/release`, `scripts/install`, `scripts/version`,
+    following the hub-core pattern of plain shell over goreleaser
+  - **The arm64 artefact is verified, not assumed.** Under qemu-aarch64 it
+    applied all 16 migrations, scanned the real library to the same counts as
+    amd64, and matched an FTS5 search — Decision 1's pure-Go claim tested
+    rather than trusted
+  - `release` refuses to ship a dynamically linked binary, since nothing else
+    in the build would mention it
+  - The installer was run in a clean Debian container: the `bard` system
+    account with no supplementary groups ran the unit's exact ExecStart and
+    served `/healthz`. Re-running keeps the existing config
+  - **Docker needed the data directory in the image, owned by uid 2273.** A
+    fresh named volume is seeded from the image including ownership, so
+    otherwise it arrives root-owned and the server cannot open its database
+  - Docker's NAT is its own `trusted_proxies` trap: a published port makes
+    every request arrive from the bridge gateway (`client=172.17.0.1`)
 - [2026-11-17] Phase 12.1: snapshots, export and import
   - `bard export` writes a tar.gz of a `VACUUM INTO` snapshot plus the cover
     cache, and deliberately no media; `bard import` refuses a populated data

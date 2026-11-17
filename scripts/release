@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Cross-compile the release artefacts into dist/ and checksum them.
+#
+# This is what goreleaser would do, and it is short enough to read: the pure-Go
+# dependencies in Decision 1 are what make the matrix two lines.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# shellcheck source=scripts/version
+source scripts/version
+
+VERSION=$(bard_version)
+DIST=${BARD_DIST:-dist}
+
+rm -rf "$DIST"
+mkdir -p "$DIST"
+
+for arch in amd64 arm64; do
+	name="bard-linux-$arch"
+	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+		go build -trimpath -ldflags "$(ldflags)" -o "$DIST/$name" ./cmd/bard
+
+	# A dynamically linked artefact would defeat the point of shipping one
+	# file, and nothing in the build announces it.
+	if command -v file >/dev/null && file "$DIST/$name" | grep -q "dynamically linked"; then
+		echo "release: $name is dynamically linked" >&2
+		exit 1
+	fi
+
+	tar -C "$DIST" -czf "$DIST/$name.tar.gz" "$name"
+	echo "built $name"
+done
+
+(cd "$DIST" && sha256sum bard-linux-*.tar.gz > checksums.txt)
+
+echo
+echo "$VERSION artefacts in $DIST/:"
+ls -1 "$DIST"

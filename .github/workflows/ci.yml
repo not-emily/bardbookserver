@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed: $unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      # The race detector needs cgo, which is why it is set here and nowhere
+      # else: the shipped binaries are built with CGO_ENABLED=0.
+      - name: go test -race
+        run: CGO_ENABLED=1 go test -race -count=1 ./...
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile the release matrix
+        run: ./scripts/release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bard-binaries
+          path: dist/
+          retention-days: 7

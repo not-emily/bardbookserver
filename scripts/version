@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Sourced by build and release. The version a binary reports comes from git,
+# so a release artefact and `bard version` can never disagree.
+
+bard_version() {
+	if [[ -n ${BARD_VERSION:-} ]]; then
+		echo "$BARD_VERSION"
+		return
+	fi
+	git describe --tags --always --dirty 2>/dev/null || echo dev
+}
+
+ldflags() {
+	echo "-s -w -X main.version=$(bard_version)"
+}

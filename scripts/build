@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Build bard for this machine. Pass --out PATH to put it somewhere else.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+OUT=${1:-bard}
+[[ $OUT == --out ]] && OUT=${2:?--out needs a path}
+
+# shellcheck source=scripts/version
+source "$(dirname "${BASH_SOURCE[0]}")/version"
+
+CGO_ENABLED=0 go build -trimpath -ldflags "$(ldflags)" -o "$OUT" ./cmd/bard
+echo "built $OUT ($(bard_version))"

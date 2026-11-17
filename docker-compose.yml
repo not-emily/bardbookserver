@@ -1,0 +1,39 @@
+# The static binary under systemd is Bard's primary install. Use this only if
+# you already run a container host.
+#
+# MOUNT MEDIA AT THE PATH IT HAS ON THE HOST. A source stores the absolute path
+# it was scanned at, so mounting /srv/books at /media/books makes every indexed
+# file unreachable the moment anything outside the container looks at it — and
+# makes the path in the admin UI a lie.
+
+services:
+  bard:
+    build:
+      context: .
+      args:
+        VERSION: docker
+    image: bard:latest
+    container_name: bard
+    restart: unless-stopped
+
+    # Published on loopback only. Put a tunnel or proxy in front of it; see
+    # docs/deploy/. Change this to 2273:2273 and the server is on your LAN.
+    ports:
+      - "127.0.0.1:2273:2273"
+
+    volumes:
+      - bard-data:/var/lib/bard
+      - ./packaging/docker/bard.yml:/etc/bard/bard.yml:ro
+      # Same path inside as outside, and read-only unless this source accepts
+      # uploads.
+      - /srv/books:/srv/books:ro
+
+    # The image runs as 2273:2273, so the volume and any upload target must be
+    # writable by that uid.
+    user: "2273:2273"
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  bard-data:

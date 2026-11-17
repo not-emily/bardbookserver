@@ -1,0 +1,46 @@
+[Unit]
+Description=Bard book server
+Documentation=https://github.com/not-emily/bardbookserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bard
+Group=bard
+ExecStart=/usr/local/bin/bard serve --config /etc/bard/bard.yml
+
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+
+# The index, covers and snapshots. Media is read-only and needs nothing here.
+ReadWritePaths=/var/lib/bard
+
+# Upload ingest is the one place Bard writes media, so a source that accepts
+# uploads has to be listed. Leave these out and a scan still works; an upload
+# fails with a permission error.
+#ReadWritePaths=/srv/books
+
+# The default port is unprivileged on purpose, so no capabilities are needed.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+LimitNOFILE=16384
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bard
+
+[Install]
+WantedBy=multi-user.target
