@@ -30,6 +30,20 @@ a reason — a reason code would confirm the book exists.
 ## Endpoints
 
 - [`POST /api/v1/auth/login`](#post-apiv1authlogin) — Exchange credentials for a device token
+- [`POST /api/v1/auth/logout`](#post-apiv1authlogout) — Revoke this device
+- [`GET /api/v1/auth/me`](#get-apiv1authme) — The current profile, device, and who else this device may become
+- [`POST /api/v1/auth/switch`](#post-apiv1authswitch) — Read as a different profile on this device
+- [`GET /api/v1/books`](#get-apiv1books) — Browse the library
+- [`GET /api/v1/books/{id}`](#get-apiv1booksid) — One book, with its editions and files
+- [`GET /api/v1/books/{id}/cover`](#get-apiv1booksidcover) — Cover image
+- [`GET /api/v1/devices`](#get-apiv1devices) — List authorized devices
+- [`DELETE /api/v1/devices/{id}`](#delete-apiv1devicesid) — Revoke a device
+- [`GET /api/v1/facets`](#get-apiv1facets) — Every facet and its values
+- [`GET /api/v1/facets/{name}`](#get-apiv1facetsname) — One facet's values
+- [`GET /api/v1/files/{id}/content`](#get-apiv1filesidcontent) — Stream or download a book file
+- [`GET /api/v1/search`](#get-apiv1search) — Search the library
+- [`GET /api/v1/series`](#get-apiv1series) — List series
+- [`GET /api/v1/series/{id}`](#get-apiv1seriesid) — One series and its books
 
 ## `POST /api/v1/auth/login`
 
@@ -57,7 +71,327 @@ No authentication required.
 | `401` | [`Error`](#error) | Invalid credentials. Deliberately not distinguished from an unknown username. |
 | `429` | [`Error`](#error) | Too many attempts. `Retry-After` carries the wait in seconds. |
 
+## `POST /api/v1/auth/logout`
+
+**Revoke this device**
+
+Revokes the token that made the request, so logging out is permanent
+rather than a client-side forget. Discard the token afterwards.
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `204` | — | Revoked. The token is dead from the next request. |
+
+## `GET /api/v1/auth/me`
+
+**The current profile, device, and who else this device may become**
+
+`user` is who the device is reading as now, which may be a managed
+profile rather than the account that signed in. `profiles` is what
+`POST /auth/switch` will accept, and is how a client draws a profile
+picker without a second request.
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Session`](#session) | The session as the server sees it. |
+
+## `POST /api/v1/auth/switch`
+
+**Read as a different profile on this device**
+
+Switches which profile the device is reading as. No new token is
+issued — the device is the identity, and the active profile is a
+property of it.
+
+A profile with `has_pin` needs `pin`. PIN attempts are rate limited
+per device and profile.
+
+A profile that does not exist is refused exactly as one belonging to
+another household would be, so a probe cannot tell the two apart.
+
+### Request body
+
+[`SwitchRequest`](#switchrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The profile now active on this device. |
+| `400` | [`Error`](#error) | A malformed body. |
+| `403` | [`Denied`](#denied) | Not switchable from this device, or a missing or wrong PIN. |
+| `429` | [`Error`](#error) | Too many PIN attempts. |
+
+## `GET /api/v1/books`
+
+**Browse the library**
+
+The main listing. Filters are facet names repeated as query
+parameters: values of one facet are OR'd, different facets are AND'd,
+so `?genre=fantasy&genre=sci-fi&format=epub` means *(fantasy or
+sci-fi) and epub*.
+
+An unknown parameter is a `400` rather than a filter that silently
+matches everything.
+
+What a restricted reader may not see never appears here, because
+visibility is part of the query rather than a filter applied after
+paging. A book that is locked but visible comes back with `locked`
+and `required_age` set.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`BookPage`](#bookpage) | One page of books. |
+| `400` | [`Error`](#error) | An unknown filter, an out-of-range limit, or an unknown sort. |
+
+## `GET /api/v1/books/{id}`
+
+**One book, with its editions and files**
+
+The detail a reader opens: description, genres, tags, and every
+edition with its files and chapters. `editions[].files[].content_url`
+is what to stream.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`BookDetail`](#bookdetail) | The book. |
+| `404` | [`Error`](#error) | No such book — or one hidden from this reader. The two are deliberately indistinguishable. |
+
+## `GET /api/v1/books/{id}/cover`
+
+**Cover image**
+
+Served from a cache of pre-scaled variants. `width` picks the smallest
+variant at least that wide; omitting it gives the full-size image.
+Carries an `ETag`, so a conditional request is cheap.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `width` | query |  | Desired width in pixels, 1 to 4000. Omit for full size. |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The image. |
+| `304` | — | Unchanged since the `ETag` you presented. |
+| `400` | [`Error`](#error) | Width out of range. |
+| `404` | [`Error`](#error) | That book has no cover, or is not visible to this reader. |
+
+## `GET /api/v1/devices`
+
+**List authorized devices**
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Every device holding a live token for this account. |
+
+## `DELETE /api/v1/devices/{id}`
+
+**Revoke a device**
+
+Takes effect on that device's next request. Revoking your own logs you out.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `204` | — | Revoked. |
+| `403` | [`Denied`](#denied) | Not your device to revoke. |
+| `404` | [`Error`](#error) | No such device. |
+
+## `GET /api/v1/facets`
+
+**Every facet and its values**
+
+What a filter UI is drawn from. Counts are computed over the books the
+reader may already see and over any filters supplied, so refining a
+search updates the remaining counts — and no count can reveal a book
+that is hidden.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Facet names mapped to their values. |
+
+## `GET /api/v1/facets/{name}`
+
+**One facet's values**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `name` | path | yes | One of the facet names. |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The facet's values. |
+| `404` | [`Error`](#error) | No such facet. |
+
+## `GET /api/v1/files/{id}/content`
+
+**Stream or download a book file**
+
+The bytes, exactly as they are on disk — **nothing is ever
+transcoded**. M4B is AAC in an MP4 container and plays natively.
+
+Range requests are supported and are how an audio player seeks;
+`Accept-Ranges: bytes` is always sent. `ETag` and `If-Range` work, so
+a resumed download cannot splice two different files together.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `Range` | header |  | A byte range, e.g. `bytes=0-1048575`. |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The whole file. |
+| `206` | — | The requested range. |
+| `404` | [`Error`](#error) | No such file, or not visible to this reader. |
+| `416` | — | The range lies outside the file. |
+
+## `GET /api/v1/search`
+
+**Search the library**
+
+Full-text search over **metadata** — titles, authors, series,
+narrators — not the text inside books. Accepts the same filters,
+sorting and paging as `GET /books`, so a search can be narrowed by
+facet.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `q` | query | yes | The search terms. |
+| `` |  |  |  |
+| `` |  |  |  |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`BookPage`](#bookpage) | Matching books, in the same envelope as a listing. |
+| `400` | [`Error`](#error) | A missing query, an unknown filter, or a bad page. |
+
+## `GET /api/v1/series`
+
+**List series**
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Every series with at least one visible book. |
+
+## `GET /api/v1/series/{id}`
+
+**One series and its books**
+
+Books come back in series order, which is what `position` is for.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The series and one page of its books. |
+| `404` | [`Error`](#error) | No such series. |
+
 ## Schemas
+
+### Book
+
+A book as it appears in a listing. Per-reader fields — `reading_state`,
+`percent`, `saved`, `rating` — belong to whoever is asking and are
+never another profile's.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `added_at` | string (date-time) | yes |  |
+| `authors` | string[] | yes |  |
+| `duration_seconds` | number |  | Longest audiobook edition, when there is one. |
+| `edition_count` | integer | yes |  |
+| `formats` | string[] | yes | e.g. epub, pdf, m4b, mp3. |
+| `has_cover` | boolean | yes |  |
+| `id` | integer (int64) | yes |  |
+| `kinds` | string[] | yes | ebook, audiobook, or both when a book has editions of each. |
+| `languages` | string[] |  |  |
+| `locked` | boolean |  | Visible but age-gated for this reader. Where a source hides locked books instead, they are absent entirely rather than marked. |
+| `narrators` | string[] |  |  |
+| `page_count` | integer |  |  |
+| `percent` | number |  | Furthest position reached, 0 to 1. Absent when never opened. |
+| `published_on` | string |  | The earliest edition's date; may be a year alone. |
+| `rating` | integer |  |  |
+| `reading_state` | string | yes |  |
+| `required_age` | integer |  | Present only when `locked`, so a client can say what it unlocks at. |
+| `saved` | boolean | yes |  |
+| `series` | [`SeriesRef`](#seriesref) |  |  |
+| `sort_title` | string | yes | Articles moved to the end, which is what to sort on. |
+| `subtitle` | string |  |  |
+| `title` | string | yes |  |
+| `uncertain_grouping` | boolean |  | Bard grouped these editions by guess, so say so rather than present it as settled. |
+
+### BookDetail
+
+### BookPage
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `books` | [`Book`](#book)[] | yes |  |
+| `limit` | integer | yes |  |
+| `offset` | integer | yes |  |
+| `total` | integer | yes | Matches before paging, counting only what this reader may see. |
+
+### Chapter
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `href` | string |  | EPUB chapters. A link into the book's own contents. |
+| `ordinal` | integer | yes |  |
+| `start_seconds` | number |  | Audiobook chapters. Offset within the edition, not the file. |
+| `title` | string |  |  |
 
 ### Denied
 
@@ -81,11 +415,59 @@ whatever that reason needs, such as the age a book requires.
 | `last_seen_ip` | string |  | Recorded for the owner's devices list. Never used as identity. |
 | `name` | string | yes |  |
 
+### Edition
+
+One manifestation of a book — the EPUB, a particular narration, an abridgement.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `abridged` | boolean | yes |  |
+| `asin` | string |  |  |
+| `chapters` | [`Chapter`](#chapter)[] |  |  |
+| `duration_seconds` | number |  |  |
+| `files` | [`File`](#file)[] | yes | More than one for an audiobook split across tracks, in `ordinal` order. |
+| `format` | string | yes |  |
+| `id` | integer (int64) | yes |  |
+| `isbn` | string |  |  |
+| `kind` | string | yes |  |
+| `language` | string |  |  |
+| `narrators` | string[] |  |  |
+| `page_count` | integer |  |  |
+| `published_on` | string |  |  |
+| `publisher` | string |  |  |
+| `uncertain_grouping` | boolean |  |  |
+
 ### Error
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `error` | string | yes | Human-readable, and not intended for matching on. |
+
+### FacetValue
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `count` | integer | yes |  |
+| `label` | string | yes | What to show. |
+| `value` | string | yes | What to send back as a filter. Not always human-readable — an author is an id. |
+
+### File
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `content_url` | string | yes | Path to stream from, relative to the server. |
+| `duration_seconds` | number |  |  |
+| `etag` | string | yes | Use with `If-Range` so a resumed download cannot splice two files. |
+| `id` | integer (int64) | yes |  |
+| `ordinal` | integer | yes | Playback order within the edition, from 1. |
+| `size_bytes` | integer (int64) | yes |  |
+
+### Genre
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | yes |  |
+| `slug` | string | yes | What the `genre` facet filters on. |
 
 ### LoginRequest
 
@@ -102,6 +484,39 @@ whatever that reason needs, such as the age a book requires.
 | `device` | [`Device`](#device) | yes |  |
 | `token` | string | yes | Opaque. Shown once, stored hashed, and revocable. |
 | `user` | [`User`](#user) | yes |  |
+
+### Series
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_count` | integer | yes | Counts only what this reader may see. |
+| `id` | integer (int64) | yes |  |
+| `name` | string | yes |  |
+
+### SeriesRef
+
+A book's place in a series, as carried on the book itself.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | integer (int64) | yes |  |
+| `name` | string | yes |  |
+| `position` | number |  | A number so a novella can sit at 1.5. |
+
+### Session
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `device` | [`Device`](#device) | yes |  |
+| `profiles` | [`User`](#user)[] | yes | Who this device may switch to, including the current profile. |
+| `user` | [`User`](#user) | yes |  |
+
+### SwitchRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `pin` | string |  | Required when the target profile has one. |
+| `user_id` | integer (int64) | yes |  |
 
 ### User
 

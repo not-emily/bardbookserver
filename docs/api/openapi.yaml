@@ -35,6 +35,12 @@ security:
 tags:
   - name: Auth
     description: Logging in, the device token, and switching managed profiles.
+  - name: Devices
+    description: The authorized devices on an account, and revoking them.
+  - name: Library
+    description: Browsing, searching and filtering the whole collection.
+  - name: Media
+    description: Cover images and the book files themselves.
 
 paths:
   /api/v1/auth/login:
@@ -87,7 +93,500 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke this device
+      operationId: logout
+      description: |
+        Revokes the token that made the request, so logging out is permanent
+        rather than a client-side forget. Discard the token afterwards.
+      responses:
+        '204':
+          description: Revoked. The token is dead from the next request.
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: The current profile, device, and who else this device may become
+      operationId: me
+      description: |
+        `user` is who the device is reading as now, which may be a managed
+        profile rather than the account that signed in. `profiles` is what
+        `POST /auth/switch` will accept, and is how a client draws a profile
+        picker without a second request.
+      responses:
+        '200':
+          description: The session as the server sees it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /api/v1/auth/switch:
+    post:
+      tags: [Auth]
+      summary: Read as a different profile on this device
+      operationId: switchProfile
+      description: |
+        Switches which profile the device is reading as. No new token is
+        issued — the device is the identity, and the active profile is a
+        property of it.
+
+        A profile with `has_pin` needs `pin`. PIN attempts are rate limited
+        per device and profile.
+
+        A profile that does not exist is refused exactly as one belonging to
+        another household would be, so a probe cannot tell the two apart.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwitchRequest'
+      responses:
+        '200':
+          description: The profile now active on this device.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: A malformed body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not switchable from this device, or a missing or wrong PIN.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '429':
+          description: Too many PIN attempts.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/devices:
+    get:
+      tags: [Devices]
+      summary: List authorized devices
+      operationId: listDevices
+      responses:
+        '200':
+          description: Every device holding a live token for this account.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+
+  /api/v1/devices/{id}:
+    delete:
+      tags: [Devices]
+      summary: Revoke a device
+      operationId: revokeDevice
+      description: Takes effect on that device's next request. Revoking your own logs you out.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '204':
+          description: Revoked.
+        '403':
+          description: Not your device to revoke.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books:
+    get:
+      tags: [Library]
+      summary: Browse the library
+      operationId: listBooks
+      description: |
+        The main listing. Filters are facet names repeated as query
+        parameters: values of one facet are OR'd, different facets are AND'd,
+        so `?genre=fantasy&genre=sci-fi&format=epub` means *(fantasy or
+        sci-fi) and epub*.
+
+        An unknown parameter is a `400` rather than a filter that silently
+        matches everything.
+
+        What a restricted reader may not see never appears here, because
+        visibility is part of the query rather than a filter applied after
+        paging. A book that is locked but visible comes back with `locked`
+        and `required_age` set.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Facets'
+      responses:
+        '200':
+          description: One page of books.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookPage'
+        '400':
+          description: An unknown filter, an out-of-range limit, or an unknown sort.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books/{id}:
+    get:
+      tags: [Library]
+      summary: One book, with its editions and files
+      operationId: getBook
+      description: |
+        The detail a reader opens: description, genres, tags, and every
+        edition with its files and chapters. `editions[].files[].content_url`
+        is what to stream.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookDetail'
+        '404':
+          description: |
+            No such book — or one hidden from this reader. The two are
+            deliberately indistinguishable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books/{id}/cover:
+    get:
+      tags: [Media]
+      summary: Cover image
+      operationId: bookCover
+      description: |
+        Served from a cache of pre-scaled variants. `width` picks the smallest
+        variant at least that wide; omitting it gives the full-size image.
+        Carries an `ETag`, so a conditional request is cheap.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - name: width
+          in: query
+          description: Desired width in pixels, 1 to 4000. Omit for full size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 4000
+      responses:
+        '200':
+          description: The image.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            image/jpeg: {}
+            image/png: {}
+        '304':
+          description: Unchanged since the `ETag` you presented.
+        '400':
+          description: Width out of range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: That book has no cover, or is not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/files/{id}/content:
+    get:
+      tags: [Media]
+      summary: Stream or download a book file
+      operationId: fileContent
+      description: |
+        The bytes, exactly as they are on disk — **nothing is ever
+        transcoded**. M4B is AAC in an MP4 container and plays natively.
+
+        Range requests are supported and are how an audio player seeks;
+        `Accept-Ranges: bytes` is always sent. `ETag` and `If-Range` work, so
+        a resumed download cannot splice two different files together.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - name: Range
+          in: header
+          description: A byte range, e.g. `bytes=0-1048575`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The whole file.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/octet-stream: {}
+        '206':
+          description: The requested range.
+          headers:
+            Content-Range:
+              schema:
+                type: string
+          content:
+            application/octet-stream: {}
+        '404':
+          description: No such file, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '416':
+          description: The range lies outside the file.
+
+  /api/v1/search:
+    get:
+      tags: [Library]
+      summary: Search the library
+      operationId: search
+      description: |
+        Full-text search over **metadata** — titles, authors, series,
+        narrators — not the text inside books. Accepts the same filters,
+        sorting and paging as `GET /books`, so a search can be narrowed by
+        facet.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: The search terms.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Facets'
+      responses:
+        '200':
+          description: Matching books, in the same envelope as a listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookPage'
+        '400':
+          description: A missing query, an unknown filter, or a bad page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/facets:
+    get:
+      tags: [Library]
+      summary: Every facet and its values
+      operationId: listFacets
+      description: |
+        What a filter UI is drawn from. Counts are computed over the books the
+        reader may already see and over any filters supplied, so refining a
+        search updates the remaining counts — and no count can reveal a book
+        that is hidden.
+      parameters:
+        - $ref: '#/components/parameters/Facets'
+      responses:
+        '200':
+          description: Facet names mapped to their values.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [facets]
+                properties:
+                  facets:
+                    type: object
+                    description: Keyed by facet name.
+                    additionalProperties:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/FacetValue'
+
+  /api/v1/facets/{name}:
+    get:
+      tags: [Library]
+      summary: One facet's values
+      operationId: getFacet
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: One of the facet names.
+          schema:
+            type: string
+            enum: [author, format, genre, kind, language, length, narrator, rating, reading_state, saved, series, year]
+        - $ref: '#/components/parameters/Facets'
+      responses:
+        '200':
+          description: The facet's values.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [facet, values]
+                properties:
+                  facet:
+                    type: string
+                  values:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FacetValue'
+        '404':
+          description: No such facet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/series:
+    get:
+      tags: [Library]
+      summary: List series
+      operationId: listSeries
+      responses:
+        '200':
+          description: Every series with at least one visible book.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [series]
+                properties:
+                  series:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Series'
+
+  /api/v1/series/{id}:
+    get:
+      tags: [Library]
+      summary: One series and its books
+      operationId: getSeries
+      description: Books come back in series order, which is what `position` is for.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: The series and one page of its books.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BookPage'
+                  - type: object
+                    required: [series]
+                    properties:
+                      series:
+                        $ref: '#/components/schemas/Series'
+        '404':
+          description: No such series.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+    Limit:
+      name: limit
+      in: query
+      description: Page size, 1 to 200. Defaults to 50.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+    Offset:
+      name: offset
+      in: query
+      description: How many to skip.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+    Sort:
+      name: sort
+      in: query
+      description: |
+        Ordering. Readable books always come before locked ones whatever is
+        chosen, so a locked book never heads a list.
+      schema:
+        type: string
+        enum: [added, author, length, published, rating, reading, saved, series, title]
+        default: title
+
+    Facets:
+      name: facet
+      in: query
+      description: |
+        **Not a literal parameter.** Each facet name is its own repeatable
+        query parameter — `genre`, `format`, `author`, and so on. Repeating
+        one ORs its values; different facets are AND'd. An unrecognised name
+        is a `400`.
+      required: false
+      schema:
+        type: string
+      examples:
+        oneGenre:
+          summary: One genre
+          value: genre=science-fiction
+        several:
+          summary: Two genres and a format
+          value: genre=science-fiction&genre=fantasy&format=epub
+
   securitySchemes:
     deviceToken:
       type: http
@@ -202,3 +701,277 @@ components:
           $ref: '#/components/schemas/User'
         device:
           $ref: '#/components/schemas/Device'
+
+    Session:
+      type: object
+      required: [user, device, profiles]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        device:
+          $ref: '#/components/schemas/Device'
+        profiles:
+          type: array
+          description: Who this device may switch to, including the current profile.
+          items:
+            $ref: '#/components/schemas/User'
+
+    SwitchRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+        pin:
+          type: string
+          description: Required when the target profile has one.
+
+    SeriesRef:
+      type: object
+      description: A book's place in a series, as carried on the book itself.
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        position:
+          type: number
+          description: A number so a novella can sit at 1.5.
+
+    Series:
+      type: object
+      required: [id, name, book_count]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        book_count:
+          type: integer
+          description: Counts only what this reader may see.
+
+    Book:
+      type: object
+      description: |
+        A book as it appears in a listing. Per-reader fields — `reading_state`,
+        `percent`, `saved`, `rating` — belong to whoever is asking and are
+        never another profile's.
+      required: [id, title, sort_title, authors, formats, kinds, edition_count, has_cover, added_at, reading_state, saved]
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        subtitle:
+          type: string
+        sort_title:
+          type: string
+          description: Articles moved to the end, which is what to sort on.
+        authors:
+          type: array
+          items:
+            type: string
+        narrators:
+          type: array
+          items:
+            type: string
+        series:
+          $ref: '#/components/schemas/SeriesRef'
+        formats:
+          type: array
+          description: e.g. epub, pdf, m4b, mp3.
+          items:
+            type: string
+        kinds:
+          type: array
+          description: ebook, audiobook, or both when a book has editions of each.
+          items:
+            type: string
+        languages:
+          type: array
+          items:
+            type: string
+        edition_count:
+          type: integer
+        duration_seconds:
+          type: number
+          description: Longest audiobook edition, when there is one.
+        page_count:
+          type: integer
+        published_on:
+          type: string
+          description: The earliest edition's date; may be a year alone.
+        has_cover:
+          type: boolean
+        uncertain_grouping:
+          type: boolean
+          description: Bard grouped these editions by guess, so say so rather than present it as settled.
+        added_at:
+          type: string
+          format: date-time
+        reading_state:
+          type: string
+          enum: [unread, reading, finished, abandoned]
+        percent:
+          type: number
+          description: Furthest position reached, 0 to 1. Absent when never opened.
+        saved:
+          type: boolean
+        rating:
+          type: integer
+        locked:
+          type: boolean
+          description: |
+            Visible but age-gated for this reader. Where a source hides locked
+            books instead, they are absent entirely rather than marked.
+        required_age:
+          type: integer
+          description: Present only when `locked`, so a client can say what it unlocks at.
+
+    BookDetail:
+      allOf:
+        - $ref: '#/components/schemas/Book'
+        - type: object
+          required: [editions]
+          properties:
+            description:
+              type: string
+            genres:
+              type: array
+              items:
+                $ref: '#/components/schemas/Genre'
+            tags:
+              type: array
+              description: Subject strings no canonical genre was mapped from.
+              items:
+                type: string
+            editions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Edition'
+
+    BookPage:
+      type: object
+      required: [books, total, limit, offset]
+      properties:
+        books:
+          type: array
+          items:
+            $ref: '#/components/schemas/Book'
+        total:
+          type: integer
+          description: Matches before paging, counting only what this reader may see.
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Genre:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+          description: What the `genre` facet filters on.
+
+    Edition:
+      type: object
+      description: One manifestation of a book — the EPUB, a particular narration, an abridgement.
+      required: [id, format, kind, abridged, files]
+      properties:
+        id:
+          type: integer
+          format: int64
+        format:
+          type: string
+        kind:
+          type: string
+          enum: [ebook, audiobook]
+        language:
+          type: string
+        publisher:
+          type: string
+        published_on:
+          type: string
+        isbn:
+          type: string
+        asin:
+          type: string
+        page_count:
+          type: integer
+        duration_seconds:
+          type: number
+        abridged:
+          type: boolean
+        narrators:
+          type: array
+          items:
+            type: string
+        uncertain_grouping:
+          type: boolean
+        files:
+          type: array
+          description: More than one for an audiobook split across tracks, in `ordinal` order.
+          items:
+            $ref: '#/components/schemas/File'
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/Chapter'
+
+    File:
+      type: object
+      required: [id, ordinal, size_bytes, etag, content_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+        ordinal:
+          type: integer
+          description: Playback order within the edition, from 1.
+        size_bytes:
+          type: integer
+          format: int64
+        duration_seconds:
+          type: number
+        etag:
+          type: string
+          description: Use with `If-Range` so a resumed download cannot splice two files.
+        content_url:
+          type: string
+          description: Path to stream from, relative to the server.
+
+    Chapter:
+      type: object
+      required: [ordinal]
+      properties:
+        ordinal:
+          type: integer
+        title:
+          type: string
+        start_seconds:
+          type: number
+          description: Audiobook chapters. Offset within the edition, not the file.
+        href:
+          type: string
+          description: EPUB chapters. A link into the book's own contents.
+
+    FacetValue:
+      type: object
+      required: [value, label, count]
+      properties:
+        value:
+          type: string
+          description: What to send back as a filter. Not always human-readable — an author is an id.
+        label:
+          type: string
+          description: What to show.
+        count:
+          type: integer

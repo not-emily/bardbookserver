@@ -5,6 +5,7 @@ package docs
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -111,6 +112,45 @@ func (s *Spec) Operation(method, path string) (Operation, bool) {
 		}
 	}
 	return Operation{}, false
+}
+
+// ResponseSchema is what a response is promised to match. The shared
+// components ride along, because a subschema lifted out of the document still
+// contains `$ref`s that resolve against its root.
+//
+// Reporting false means the spec promises no JSON body, which for a 204 is
+// the right answer and for anything else is itself worth failing over.
+func (s *Spec) ResponseSchema(method, path, status string) (map[string]any, bool) {
+	op, ok := s.Operation(method, path)
+	if !ok {
+		return nil, false
+	}
+
+	responses, _ := op.Detail["responses"].(map[string]any)
+	response, _ := responses[status].(map[string]any)
+	content, _ := response["content"].(map[string]any)
+	media, _ := content["application/json"].(map[string]any)
+	schema, _ := media["schema"].(map[string]any)
+	if schema == nil {
+		return nil, false
+	}
+
+	rooted := make(map[string]any, len(schema)+1)
+	maps.Copy(rooted, schema)
+	rooted["components"] = s.Components()
+	return rooted, true
+}
+
+// DocumentsStatus reports whether the operation mentions this status at all,
+// so a response nobody wrote down is distinguishable from one with no body.
+func (s *Spec) DocumentsStatus(method, path, status string) bool {
+	op, ok := s.Operation(method, path)
+	if !ok {
+		return false
+	}
+	responses, _ := op.Detail["responses"].(map[string]any)
+	_, found := responses[status]
+	return found
 }
 
 // Components is the shared schema pool, carried alongside any subschema so a
