@@ -110,12 +110,9 @@ func cmdUserAdd(args []string) error {
 		}
 		in.OwnerID = &ownerUser.ID
 	} else {
-		password, err := readSecret("Password: ", true)
+		password, err := choosePassword("Choose a password for the new Bard account %q.", *username)
 		if err != nil {
 			return err
-		}
-		if len(password) < 8 {
-			return errors.New("password must be at least 8 characters")
 		}
 		in.Password = password
 	}
@@ -176,12 +173,9 @@ func cmdUserPasswd(args []string) error {
 		return errors.New("a managed profile has no password; set a PIN instead")
 	}
 
-	password, err := readSecret("New password: ", true)
+	password, err := choosePassword("Setting a new password for the Bard account %q.", user.Username)
 	if err != nil {
 		return err
-	}
-	if len(password) < 8 {
-		return errors.New("password must be at least 8 characters")
 	}
 	if err := store.SetPassword(ctx, user.ID, password); err != nil {
 		return err
@@ -299,6 +293,24 @@ func label(on bool, text string) string {
 
 // readSecret reads without echo from a terminal, and falls back to a plain
 // line when stdin is a pipe so the commands stay scriptable.
+const minPasswordLen = 8
+
+func choosePassword(intro, username string) (string, error) {
+	fmt.Fprintf(os.Stderr, intro+"\n", username)
+	fmt.Fprintf(os.Stderr,
+		"This is a Bard login, not your system account. At least %d characters.\n",
+		minPasswordLen)
+
+	password, err := readSecret("New password: ", true)
+	if err != nil {
+		return "", err
+	}
+	if len(password) < minPasswordLen {
+		return "", fmt.Errorf("password must be at least %d characters", minPasswordLen)
+	}
+	return password, nil
+}
+
 func readSecret(prompt string, confirm bool) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
