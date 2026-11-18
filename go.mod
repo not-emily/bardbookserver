@@ -6,6 +6,7 @@ require (
 	github.com/abema/go-mp4 v1.7.4
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/pdfcpu/pdfcpu v0.16.4
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/crypto v0.59.0
 	golang.org/x/image v0.48.0
 	golang.org/x/term v0.48.0

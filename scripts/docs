@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Regenerate docs/api.md from docs/api/openapi.yaml.
+#
+# The YAML is the source of truth. A test fails if the generated file is stale,
+# so run this after editing the spec.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+go run ./internal/docs/gen "$@"

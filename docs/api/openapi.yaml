@@ -1,0 +1,204 @@
+openapi: 3.1.0
+
+info:
+  title: Bard
+  version: 0.1.0
+  summary: A self-hosted server for ebooks and audiobooks.
+  description: |
+    Bard serves its admin UI, this JSON API and the media itself from one
+    origin on one port. A client points at the host and nothing else.
+
+    **Authentication is a per-device bearer token.** `POST /auth/login`
+    exchanges a username and password for one, and that token is presented as
+    `Authorization: Bearer <token>` on every later request. Tokens are opaque
+    and revocable: there is nothing to verify offline, because revocation that
+    takes effect on the next request is worth more than statelessness here.
+
+    **CSRF does not apply to this API.** It guards the cookie-authenticated
+    browser session only, since a cross-site form cannot set an
+    `Authorization` header. A native client never sends a CSRF token.
+
+    **Content a reader may not see is absent rather than refused.** Where a
+    source hides age-locked books, requesting one gives `404`, not `403` with
+    a reason — a reason code would confirm the book exists.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://bard.example.com
+    description: Your own server, behind whichever transport you chose.
+
+security:
+  - deviceToken: []
+
+tags:
+  - name: Auth
+    description: Logging in, the device token, and switching managed profiles.
+
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Exchange credentials for a device token
+      operationId: login
+      security: []
+      description: |
+        The only unauthenticated endpoint. Rate limited per resolved client
+        address, so a server whose `trusted_proxies` is wrong throttles every
+        client as one — see `/diagnostics` in the admin UI.
+
+        `device_name` is what the account holder sees in their authorized
+        devices list, so it should name the device rather than the app.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: A new device token. Store it; it is not retrievable again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Username or password missing, or a malformed body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid credentials. Deliberately not distinguished from an unknown username.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Too many attempts. `Retry-After` carries the wait in seconds.
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: |
+        The opaque token from `POST /auth/login`, sent as
+        `Authorization: Bearer <token>`. Revoking the device in the admin UI
+        takes effect on the next request.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable, and not intended for matching on.
+      examples:
+        - error: invalid credentials
+
+    Denied:
+      type: object
+      description: |
+        An authorization failure that the reader is allowed to know about.
+        `reason` is the stable code to branch on; extra properties carry
+        whatever that reason needs, such as the age a book requires.
+      required: [error, reason]
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+          description: A stable code; `error` is the sentence for a person.
+      additionalProperties: true
+
+    User:
+      type: object
+      required: [id, username, display_name, is_admin, restricted, managed, can_upload, has_pin]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        display_name:
+          type: string
+        is_admin:
+          type: boolean
+        restricted:
+          type: boolean
+          description: Subject to age gating.
+        managed:
+          type: boolean
+          description: A passwordless profile switched into from its owner's device.
+        can_upload:
+          type: boolean
+        has_pin:
+          type: boolean
+          description: Whether switching into this profile asks for a PIN.
+        age:
+          type: integer
+          description: Present only when a birth date is set. Absent is not zero.
+
+    Device:
+      type: object
+      required: [id, name, active_user_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        active_user_id:
+          type: integer
+          format: int64
+          description: The profile this device is currently reading as, which may be a managed user.
+        last_seen_ip:
+          type: string
+          description: Recorded for the owner's devices list. Never used as identity.
+        last_seen_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+        device_name:
+          type: string
+          description: Shown in the authorized devices list, e.g. "Emily's iPhone".
+      examples:
+        - username: emily
+          password: a long enough phrase
+          device_name: Emily's iPhone
+
+    LoginResponse:
+      type: object
+      required: [token, user, device]
+      properties:
+        token:
+          type: string
+          description: Opaque. Shown once, stored hashed, and revocable.
+        user:
+          $ref: '#/components/schemas/User'
+        device:
+          $ref: '#/components/schemas/Device'
