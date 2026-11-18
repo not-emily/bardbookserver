@@ -130,16 +130,15 @@ has no browser, so either forward the port to this machine:
 
 or create the account over SSH instead:
 
-    ssh -t $SERVER "sudo -u bard /usr/local/bin/bard user add --admin --username <you>"
+    ssh -t $SERVER "sudo -u bard bard user add --admin --username <you>"
 
 Run bard's CLI as the bard user, never as root: root would leave the database
 and its write-ahead log owned by root, and the service could not write to them.
 
 THEN point it at your books and scan:
 
-    ssh -t $SERVER "sudo -u bard /usr/local/bin/bard source add \\
-        --name Books --path /srv/books --min-age 0"
-    ssh -t $SERVER "sudo -u bard /usr/local/bin/bard scan"
+    ssh -t $SERVER "sudo -u bard bard source add --name Books --path /srv/books --min-age 0"
+    ssh -t $SERVER "sudo -u bard bard scan"
 
 The bard account must be able to read that path. Uploads also need it listed in
 ReadWritePaths= in /etc/systemd/system/bard.service, because the unit runs with

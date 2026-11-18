@@ -31,6 +31,42 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	}
 }
 
+// A service account started with `sudo -u` inherits the caller's working
+// directory, and an Ubuntu home is 0750, so resolving the relative search path
+// gives permission denied. That must not stop the search before
+// /etc/bard/bard.yml, or every headless `bard user add` fails.
+func TestLoadSkipsAnUnreadableSearchPath(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads regardless of mode")
+	}
+
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("bard.yml", []byte("port: 9999\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(""); err != nil {
+		t.Fatalf("an unreadable ./bard.yml ended the search: %v", err)
+	}
+}
+
+// Naming a file outright is a different promise: silently falling back to
+// defaults would hide the typo.
+func TestLoadFailsOnAnUnreadableExplicitPath(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads regardless of mode")
+	}
+
+	path := filepath.Join(t.TempDir(), "bard.yml")
+	if err := os.WriteFile(path, []byte("port: 9999\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("an unreadable --config was accepted")
+	}
+}
+
 // The shipped example must load, since it is what an operator starts from.
 func TestLoadExampleConfig(t *testing.T) {
 	cfg, err := Load("example.yml")

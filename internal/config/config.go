@@ -149,18 +149,23 @@ func SearchPaths() []string {
 func Load(path string) (*Config, error) {
 	cfg := defaults()
 
+	explicit := path != ""
 	candidates := []string{path}
-	if path == "" {
+	if !explicit {
 		candidates = SearchPaths()
 	}
 
 	for _, p := range candidates {
 		data, err := os.ReadFile(p)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
 		if err != nil {
-			return nil, fmt.Errorf("read config %s: %w", p, err)
+			// The relative search path resolves against a working directory
+			// that a `sudo -u` service account often cannot enter, which is
+			// permission denied rather than absence and must not end the
+			// search. Only a file named outright is worth failing over.
+			if explicit && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("read config %s: %w", p, err)
+			}
+			continue
 		}
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("parse config %s: %w", p, err)
