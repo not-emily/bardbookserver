@@ -5,6 +5,43 @@ until 1.0 the API may still change between minor versions.
 
 [semver]: https://semver.org/
 
+## v0.1.1 — 2026-11-18
+
+The first real install found a bug, and writing the API down found several
+more places the documentation was ahead of the code.
+
+### Fixed
+
+- **`bard user add` failed on a headless install** with `read config
+  bard.yml: permission denied`. `sudo -u bard` keeps the caller's working
+  directory, an Ubuntu home is `0750`, and resolving the relative search path
+  from inside one gives permission denied rather than absence — which ended
+  the search before `/etc/bard/bard.yml` was ever tried. A search path that
+  cannot be read is now simply not the config; a file named with `--config`
+  still fails loudly.
+- `user add` and `user passwd` now say whose password they are asking for and
+  state the minimum length up front. Over SSH the prompt follows sudo's own,
+  and a bare `Password:` reads as sudo asking again.
+
+### Added
+
+- **An API reference**: `docs/api.md`, generated from `docs/api/openapi.yaml`
+  by `scripts/docs`. All fifty endpoints, with every response checked against
+  the spec by the test suite, so it describes the server rather than an
+  intention.
+- `scripts/deploy` builds for a remote host, copies the binary beside the
+  installer and the unit, and can run the install over SSH. The host needs no
+  Go, no git and no access to GitHub.
+- Release archives now carry the installer and the systemd unit, so a
+  download installs without cloning anything.
+
+### Changed
+
+- A deploy stages in `/var/tmp` rather than `/tmp`, which is cleared on reboot
+  and often tmpfs — the staged files are meant to outlive the copy.
+- The Cloudflare Tunnel recipe tracks the dashboard's rename of Public
+  Hostname to **Add a route → Published application**.
+
 ## v0.1.0 — 2026-11-17
 
 First release. Everything below is the initial feature set rather than a list
