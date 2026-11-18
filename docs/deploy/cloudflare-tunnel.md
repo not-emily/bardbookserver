@@ -63,10 +63,16 @@ file, no browser on the server, and no `cert.pem`.
    ```
    sudo cloudflared service install <TOKEN>
    ```
-4. Still in the dashboard, add a **public hostname** to the tunnel:
+4. Still in the dashboard, give the tunnel a route: **Add a route → Published
+   application**. The other three options are Zero Trust private networking and
+   need the WARP client on every device, which is not what you want here.
    - **Subdomain/domain**: whatever you want, e.g. `books.example.com`
    - **Service type**: `HTTP`
    - **URL**: `localhost:2273`
+
+   Cloudflare used to call this a **Public Hostname**, and older guides still
+   do. If the wording has moved again, the one you want is whichever says it
+   publishes to the internet.
 
 DNS is created for you. `https://books.example.com` now reaches Bard.
 
