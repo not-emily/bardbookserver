@@ -103,6 +103,70 @@ func TestDocumentedResponsesMatchTheSpec(t *testing.T) {
 	}
 }
 
+// The private-space endpoints need state before they have a shape worth
+// checking, so this drives them rather than reading them cold.
+func TestReadingResponsesMatchTheSpec(t *testing.T) {
+	spec := loadSpec(t)
+	h := newHarness(t)
+	lib := h.seedLibrary()
+
+	progress := fmt.Sprintf("/api/v1/editions/%d/progress", lib.duneEPUB)
+	assertMatches(t, spec, "PUT", "/api/v1/editions/{id}/progress",
+		h.sendJSON("PUT", progress, h.token, map[string]any{
+			"cfi": "epubcfi(/6/14!/4/2/2/1:0)", "page": 120, "percent": 0.42, "client_seq": 1,
+		}))
+	assertMatches(t, spec, "GET", "/api/v1/editions/{id}/progress", h.get(progress))
+
+	// Divergence changes the shape, so it is checked rather than assumed to
+	// be the same object with a flag flipped.
+	other := h.addDevice("Second device")
+	assertMatches(t, spec, "PUT", "/api/v1/editions/{id}/progress",
+		h.sendJSON("PUT", progress, other, map[string]any{
+			"cfi": "epubcfi(/6/2!/4/2/2/1:0)", "page": 8, "percent": 0.04, "client_seq": 1,
+		}))
+
+	saved := fmt.Sprintf("/api/v1/books/%d/saved", lib.dune)
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/saved", h.sendJSON("PUT", saved, h.token, nil))
+	assertMatches(t, spec, "DELETE", "/api/v1/books/{id}/saved", h.sendJSON("DELETE", saved, h.token, nil))
+
+	rating := fmt.Sprintf("/api/v1/books/%d/rating", lib.dune)
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/rating",
+		h.sendJSON("PUT", rating, h.token, map[string]any{"rating": 4}))
+	assertMatches(t, spec, "DELETE", "/api/v1/books/{id}/rating", h.sendJSON("DELETE", rating, h.token, nil))
+
+	state := fmt.Sprintf("/api/v1/books/%d/state", lib.dune)
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/state",
+		h.sendJSON("PUT", state, h.token, map[string]any{"state": "finished"}))
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/state",
+		h.sendJSON("PUT", state, h.token, map[string]any{"state": nil}))
+
+	assertMatches(t, spec, "GET", "/api/v1/history", h.get("/api/v1/history"))
+	assertMatches(t, spec, "GET", "/api/v1/sync", h.get("/api/v1/sync"))
+
+	assertMatches(t, spec, "GET", "/api/v1/books/{id}/handoff",
+		h.get(fmt.Sprintf("/api/v1/books/%d/handoff", lib.dune)))
+	assertMatches(t, spec, "POST", "/api/v1/editions/{id}/handoff",
+		h.sendJSON("POST", fmt.Sprintf("/api/v1/editions/%d/handoff", lib.duneEPUB), h.token,
+			map[string]any{"to_edition_id": lib.duneM4B, "percent": 0.42}))
+}
+
+func TestReadingErrorsMatchTheSpec(t *testing.T) {
+	spec := loadSpec(t)
+	h := newHarness(t)
+	lib := h.seedLibrary()
+
+	assertMatches(t, spec, "GET", "/api/v1/editions/{id}/progress",
+		h.get("/api/v1/editions/99999/progress"))
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/rating",
+		h.sendJSON("PUT", fmt.Sprintf("/api/v1/books/%d/rating", lib.dune), h.token,
+			map[string]any{"rating": 99}))
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/state",
+		h.sendJSON("PUT", fmt.Sprintf("/api/v1/books/%d/state", lib.dune), h.token,
+			map[string]any{"state": "sideways"}))
+	assertMatches(t, spec, "PUT", "/api/v1/books/{id}/saved",
+		h.sendJSON("PUT", "/api/v1/books/99999/saved", h.token, nil))
+}
+
 // The error shapes are as much a promise as the success ones, and are what a
 // client branches on.
 func TestDocumentedErrorsMatchTheSpec(t *testing.T) {

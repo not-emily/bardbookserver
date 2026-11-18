@@ -41,6 +41,11 @@ tags:
     description: Browsing, searching and filtering the whole collection.
   - name: Media
     description: Cover images and the book files themselves.
+  - name: Reading
+    description: |
+      Where a reader is, what they have shelved and rated, and what to
+      pre-cache. Every one of these is private to the profile asking — no
+      endpoint exposes one reader's space to another, including to an admin.
 
 paths:
   /api/v1/auth/login:
@@ -528,6 +533,343 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/editions/{id}/progress:
+    get:
+      tags: [Reading]
+      summary: Where every device is in this edition
+      operationId: getProgress
+      description: |
+        Positions are kept **per device and never resolved into one**. A
+        client shows where this device was, and surfaces the others when they
+        disagree rather than silently adopting the newest.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Every device's position in this edition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Progress'
+        '404':
+          description: No such edition, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      tags: [Reading]
+      summary: Report this device's position
+      operationId: setProgress
+      description: |
+        Send the position for whichever kind of edition this is: `cfi` and
+        `page` for an ebook, `seconds` and `file_index` for an audiobook.
+        `percent` is required either way and is what cross-edition handoff and
+        sorting use.
+
+        `client_seq` is the device's own counter, incremented per save. It is
+        what makes divergence detectable: a device reporting a sequence that
+        does not follow from what the server last saw from it means the two
+        were edited apart, and the reply comes back with `diverged` set and
+        **both** positions kept.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgressRequest'
+      responses:
+        '200':
+          description: The stored positions, including this one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Progress'
+        '400':
+          description: A malformed body, or a percent outside 0 to 1.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such edition, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books/{id}/saved:
+    put:
+      tags: [Reading]
+      summary: Add to the saved shelf
+      operationId: saveBook
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The book's state for this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReaderState'
+        '404':
+          description: No such book, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Reading]
+      summary: Remove from the saved shelf
+      operationId: unsaveBook
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The book's state for this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReaderState'
+        '404':
+          description: No such book, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books/{id}/rating:
+    put:
+      tags: [Reading]
+      summary: Rate a book
+      operationId: setRating
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating:
+                  type: [integer, 'null']
+                  minimum: 1
+                  maximum: 5
+                  description: Null clears it, which is the same as DELETE.
+      responses:
+        '200':
+          description: The book's state for this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReaderState'
+        '400':
+          description: A rating outside 1 to 5.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such book, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Reading]
+      summary: Clear a rating
+      operationId: clearRating
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The book's state for this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReaderState'
+        '404':
+          description: No such book, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books/{id}/state:
+    put:
+      tags: [Reading]
+      summary: Mark finished or abandoned
+      operationId: setState
+      description: |
+        Only the two states a person sets by hand. `unread` and `reading`
+        derive from progress, so there is nothing to set them to — send
+        `null` to clear a mark and let progress speak again.
+
+        `reading_state` in the reply is the derived answer, which is not
+        always what was marked.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state:
+                  type: [string, 'null']
+                  enum: [finished, abandoned, null]
+      responses:
+        '200':
+          description: The book's state for this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReaderState'
+        '400':
+          description: A state other than finished, abandoned or null.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such book, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/history:
+    get:
+      tags: [Reading]
+      summary: Books this reader has finished
+      operationId: history
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Finished books, most recent first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [history, total, limit, offset]
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HistoryEntry'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /api/v1/sync:
+    get:
+      tags: [Reading]
+      summary: What this reader would want held offline
+      operationId: sync
+      description: |
+        A manifest, not an instruction. The server says what is worth caching
+        and why; **the client decides what to hold**, because only the device
+        knows its storage, battery and network — and nothing here is licensed,
+        so there is nothing to revoke.
+
+        `total_bytes` is the whole manifest, for showing a cost before
+        downloading.
+      responses:
+        '200':
+          description: Editions worth pre-caching.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncManifest'
+
+  /api/v1/books/{id}/handoff:
+    get:
+      tags: [Reading]
+      summary: Where you would land in each other edition
+      operationId: bookHandoffTargets
+      description: |
+        For drawing "continue in…": every edition of the book with the
+        position this reader would arrive at, so a client can offer the switch
+        before committing to it.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Each edition and the position it would open at.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [book_id, editions]
+                properties:
+                  book_id:
+                    type: integer
+                    format: int64
+                  editions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HandoffTarget'
+        '404':
+          description: No such book, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/editions/{id}/handoff:
+    post:
+      tags: [Reading]
+      summary: Carry a position into another edition
+      operationId: handoff
+      description: |
+        Read, then listen. Maps a position in this edition onto another one —
+        by aligning chapter lists where both have them, and falling back to
+        proportion where they cannot be aligned. `method` says which happened,
+        which is worth showing: a proportional jump in a sixteen-hour
+        audiobook can be minutes out.
+
+        Omit `percent` to hand off from this reader's own stored position,
+        which is the usual case.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffRequest'
+      responses:
+        '200':
+          description: Where to open the target edition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handoff'
+        '400':
+          description: A malformed body, or a target that is not an edition of the same book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such edition, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   parameters:
     ID:
@@ -962,6 +1304,258 @@ components:
         href:
           type: string
           description: EPUB chapters. A link into the book's own contents.
+
+    Position:
+      type: object
+      description: One device's place in an edition.
+      required: [edition_id, device_id, device_name, percent, client_seq, this_device, updated_at]
+      properties:
+        edition_id:
+          type: integer
+          format: int64
+        device_id:
+          type: integer
+          format: int64
+        device_name:
+          type: string
+          description: So a divergence can name the device rather than a number.
+        this_device:
+          type: boolean
+          description: Whether this is the position of the device that asked.
+        percent:
+          type: number
+          description: 0 to 1, and the only field every edition kind has.
+        cfi:
+          type: string
+          description: EPUB position.
+        page:
+          type: integer
+          description: PDF page, or an EPUB's rendered page where one is known.
+        seconds:
+          type: number
+          description: Audiobook offset within the edition, not within the file.
+        file_index:
+          type: integer
+          description: Which file of a multi-file audiobook.
+        client_seq:
+          type: integer
+          format: int64
+          description: The reporting device's own counter.
+        updated_at:
+          type: string
+          format: date-time
+
+    Progress:
+      type: object
+      required: [edition_id, positions, diverged]
+      properties:
+        edition_id:
+          type: integer
+          format: int64
+        diverged:
+          type: boolean
+          description: |
+            Two or more devices hold positions that did not follow from one
+            another. Both are kept; resolving them is the client's to offer,
+            and is deliberately never done silently.
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Position'
+
+    ProgressRequest:
+      type: object
+      required: [percent, client_seq]
+      properties:
+        percent:
+          type: number
+          minimum: 0
+          maximum: 1
+        client_seq:
+          type: integer
+          format: int64
+          description: This device's counter, incremented on every save.
+        cfi:
+          type: [string, 'null']
+        page:
+          type: [integer, 'null']
+        seconds:
+          type: [number, 'null']
+        file_index:
+          type: [integer, 'null']
+
+    ReaderState:
+      type: object
+      description: One book as it stands for the reader asking. Never another profile's.
+      required: [book_id, reading_state]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+        reading_state:
+          type: string
+          enum: [unread, reading, finished, abandoned]
+          description: Derived from progress and any hand-set mark.
+        marked:
+          type: string
+          enum: [finished, abandoned]
+          description: What was set by hand, when anything was.
+        percent:
+          type: number
+        saved:
+          type: boolean
+        saved_at:
+          type: string
+          format: date-time
+        rating:
+          type: integer
+        finished_at:
+          type: string
+          format: date-time
+
+    HistoryEntry:
+      type: object
+      required: [book_id, title]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        finished_at:
+          type: string
+          format: date-time
+        rating:
+          type: integer
+
+    SyncFile:
+      type: object
+      required: [id, ordinal, size_bytes, etag, content_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+        ordinal:
+          type: integer
+        size_bytes:
+          type: integer
+          format: int64
+        etag:
+          type: string
+        content_url:
+          type: string
+
+    SyncEdition:
+      type: object
+      required: [book_id, edition_id, title, format, kind, reason, size_bytes, files]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+        edition_id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        format:
+          type: string
+        kind:
+          type: string
+          enum: [ebook, audiobook]
+        reason:
+          type: string
+          enum: [reading, saved, next_in_series]
+          description: Why this is worth holding, so a client can prioritise.
+        size_bytes:
+          type: integer
+          format: int64
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncFile'
+
+    SyncManifest:
+      type: object
+      required: [editions, reasons, total_bytes]
+      properties:
+        editions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncEdition'
+        reasons:
+          type: array
+          description: Every reason this server may give, in priority order.
+          items:
+            type: string
+        total_bytes:
+          type: integer
+          format: int64
+
+    HandoffTarget:
+      type: object
+      required: [edition_id, format, kind, percent, chapters]
+      properties:
+        edition_id:
+          type: integer
+          format: int64
+        format:
+          type: string
+        kind:
+          type: string
+          enum: [ebook, audiobook]
+        percent:
+          type: number
+          description: Where this reader would arrive in this edition.
+        chapters:
+          type: integer
+          description: How many chapters are known, which is what decides chapter alignment.
+
+    HandoffRequest:
+      type: object
+      required: [to_edition_id]
+      properties:
+        to_edition_id:
+          type: integer
+          format: int64
+        percent:
+          type: [number, 'null']
+          description: Omit to hand off from this reader's stored position.
+        chapter_ordinal:
+          type: [integer, 'null']
+          description: Hand off from a chapter rather than a proportion.
+        chapter_percent:
+          type: number
+          description: How far into that chapter, 0 to 1.
+
+    Handoff:
+      type: object
+      required: [from_edition_id, to_edition_id, method, percent]
+      properties:
+        from_edition_id:
+          type: integer
+          format: int64
+        to_edition_id:
+          type: integer
+          format: int64
+        method:
+          type: string
+          enum: [chapter, percent]
+          description: |
+            `chapter` aligned both chapter lists and interpolated inside the
+            match. `percent` is the fallback, and is the less precise of the
+            two — worth saying so in a long audiobook.
+        percent:
+          type: number
+        seconds:
+          type: number
+          description: Where to start, for an audiobook target.
+        chapter_ordinal:
+          type: integer
+        chapter_title:
+          type: string
+        chapter_href:
+          type: string
+          description: Where to open, for an EPUB target.
 
     FacetValue:
       type: object

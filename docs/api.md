@@ -36,14 +36,25 @@ a reason — a reason code would confirm the book exists.
 - [`GET /api/v1/books`](#get-apiv1books) — Browse the library
 - [`GET /api/v1/books/{id}`](#get-apiv1booksid) — One book, with its editions and files
 - [`GET /api/v1/books/{id}/cover`](#get-apiv1booksidcover) — Cover image
+- [`GET /api/v1/books/{id}/handoff`](#get-apiv1booksidhandoff) — Where you would land in each other edition
+- [`DELETE /api/v1/books/{id}/rating`](#delete-apiv1booksidrating) — Clear a rating
+- [`PUT /api/v1/books/{id}/rating`](#put-apiv1booksidrating) — Rate a book
+- [`DELETE /api/v1/books/{id}/saved`](#delete-apiv1booksidsaved) — Remove from the saved shelf
+- [`PUT /api/v1/books/{id}/saved`](#put-apiv1booksidsaved) — Add to the saved shelf
+- [`PUT /api/v1/books/{id}/state`](#put-apiv1booksidstate) — Mark finished or abandoned
 - [`GET /api/v1/devices`](#get-apiv1devices) — List authorized devices
 - [`DELETE /api/v1/devices/{id}`](#delete-apiv1devicesid) — Revoke a device
+- [`POST /api/v1/editions/{id}/handoff`](#post-apiv1editionsidhandoff) — Carry a position into another edition
+- [`GET /api/v1/editions/{id}/progress`](#get-apiv1editionsidprogress) — Where every device is in this edition
+- [`PUT /api/v1/editions/{id}/progress`](#put-apiv1editionsidprogress) — Report this device's position
 - [`GET /api/v1/facets`](#get-apiv1facets) — Every facet and its values
 - [`GET /api/v1/facets/{name}`](#get-apiv1facetsname) — One facet's values
 - [`GET /api/v1/files/{id}/content`](#get-apiv1filesidcontent) — Stream or download a book file
+- [`GET /api/v1/history`](#get-apiv1history) — Books this reader has finished
 - [`GET /api/v1/search`](#get-apiv1search) — Search the library
 - [`GET /api/v1/series`](#get-apiv1series) — List series
 - [`GET /api/v1/series/{id}`](#get-apiv1seriesid) — One series and its books
+- [`GET /api/v1/sync`](#get-apiv1sync) — What this reader would want held offline
 
 ## `POST /api/v1/auth/login`
 
@@ -198,6 +209,113 @@ Carries an `ETag`, so a conditional request is cheap.
 | `400` | [`Error`](#error) | Width out of range. |
 | `404` | [`Error`](#error) | That book has no cover, or is not visible to this reader. |
 
+## `GET /api/v1/books/{id}/handoff`
+
+**Where you would land in each other edition**
+
+For drawing "continue in…": every edition of the book with the
+position this reader would arrive at, so a client can offer the switch
+before committing to it.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Each edition and the position it would open at. |
+| `404` | [`Error`](#error) | No such book, or not visible to this reader. |
+
+## `DELETE /api/v1/books/{id}/rating`
+
+**Clear a rating**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`ReaderState`](#readerstate) | The book's state for this reader. |
+| `404` | [`Error`](#error) | No such book, or not visible to this reader. |
+
+## `PUT /api/v1/books/{id}/rating`
+
+**Rate a book**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`ReaderState`](#readerstate) | The book's state for this reader. |
+| `400` | [`Error`](#error) | A rating outside 1 to 5. |
+| `404` | [`Error`](#error) | No such book, or not visible to this reader. |
+
+## `DELETE /api/v1/books/{id}/saved`
+
+**Remove from the saved shelf**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`ReaderState`](#readerstate) | The book's state for this reader. |
+| `404` | [`Error`](#error) | No such book, or not visible to this reader. |
+
+## `PUT /api/v1/books/{id}/saved`
+
+**Add to the saved shelf**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`ReaderState`](#readerstate) | The book's state for this reader. |
+| `404` | [`Error`](#error) | No such book, or not visible to this reader. |
+
+## `PUT /api/v1/books/{id}/state`
+
+**Mark finished or abandoned**
+
+Only the two states a person sets by hand. `unread` and `reading`
+derive from progress, so there is nothing to set them to — send
+`null` to clear a mark and let progress speak again.
+
+`reading_state` in the reply is the derived answer, which is not
+always what was marked.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`ReaderState`](#readerstate) | The book's state for this reader. |
+| `400` | [`Error`](#error) | A state other than finished, abandoned or null. |
+| `404` | [`Error`](#error) | No such book, or not visible to this reader. |
+
 ## `GET /api/v1/devices`
 
 **List authorized devices**
@@ -225,6 +343,85 @@ Takes effect on that device's next request. Revoking your own logs you out.
 | `204` | — | Revoked. |
 | `403` | [`Denied`](#denied) | Not your device to revoke. |
 | `404` | [`Error`](#error) | No such device. |
+
+## `POST /api/v1/editions/{id}/handoff`
+
+**Carry a position into another edition**
+
+Read, then listen. Maps a position in this edition onto another one —
+by aligning chapter lists where both have them, and falling back to
+proportion where they cannot be aligned. `method` says which happened,
+which is worth showing: a proportional jump in a sixteen-hour
+audiobook can be minutes out.
+
+Omit `percent` to hand off from this reader's own stored position,
+which is the usual case.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+[`HandoffRequest`](#handoffrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Handoff`](#handoff) | Where to open the target edition. |
+| `400` | [`Error`](#error) | A malformed body, or a target that is not an edition of the same book. |
+| `404` | [`Error`](#error) | No such edition, or not visible to this reader. |
+
+## `GET /api/v1/editions/{id}/progress`
+
+**Where every device is in this edition**
+
+Positions are kept **per device and never resolved into one**. A
+client shows where this device was, and surfaces the others when they
+disagree rather than silently adopting the newest.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Progress`](#progress) | Every device's position in this edition. |
+| `404` | [`Error`](#error) | No such edition, or not visible to this reader. |
+
+## `PUT /api/v1/editions/{id}/progress`
+
+**Report this device's position**
+
+Send the position for whichever kind of edition this is: `cfi` and
+`page` for an ebook, `seconds` and `file_index` for an audiobook.
+`percent` is required either way and is what cross-edition handoff and
+sorting use.
+
+`client_seq` is the device's own counter, incremented per save. It is
+what makes divergence detectable: a device reporting a sequence that
+does not follow from what the server last saw from it means the two
+were edited apart, and the reply comes back with `diverged` set and
+**both** positions kept.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+[`ProgressRequest`](#progressrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Progress`](#progress) | The stored positions, including this one. |
+| `400` | [`Error`](#error) | A malformed body, or a percent outside 0 to 1. |
+| `404` | [`Error`](#error) | No such edition, or not visible to this reader. |
 
 ## `GET /api/v1/facets`
 
@@ -286,6 +483,21 @@ a resumed download cannot splice two different files together.
 | `404` | [`Error`](#error) | No such file, or not visible to this reader. |
 | `416` | — | The range lies outside the file. |
 
+## `GET /api/v1/history`
+
+**Books this reader has finished**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Finished books, most recent first. |
+
 ## `GET /api/v1/search`
 
 **Search the library**
@@ -338,6 +550,24 @@ Books come back in series order, which is what `position` is for.
 | --- | --- | --- |
 | `200` | — | The series and one page of its books. |
 | `404` | [`Error`](#error) | No such series. |
+
+## `GET /api/v1/sync`
+
+**What this reader would want held offline**
+
+A manifest, not an instruction. The server says what is worth caching
+and why; **the client decides what to hold**, because only the device
+knows its storage, battery and network — and nothing here is licensed,
+so there is nothing to revoke.
+
+`total_bytes` is the whole manifest, for showing a cost before
+downloading.
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`SyncManifest`](#syncmanifest) | Editions worth pre-caching. |
 
 ## Schemas
 
@@ -469,6 +699,47 @@ One manifestation of a book — the EPUB, a particular narration, an abridgement
 | `name` | string | yes |  |
 | `slug` | string | yes | What the `genre` facet filters on. |
 
+### Handoff
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `chapter_href` | string |  | Where to open, for an EPUB target. |
+| `chapter_ordinal` | integer |  |  |
+| `chapter_title` | string |  |  |
+| `from_edition_id` | integer (int64) | yes |  |
+| `method` | string | yes | `chapter` aligned both chapter lists and interpolated inside the match. `percent` is the fallback, and is the less precise of the two — worth saying so in a long audiobook. |
+| `percent` | number | yes |  |
+| `seconds` | number |  | Where to start, for an audiobook target. |
+| `to_edition_id` | integer (int64) | yes |  |
+
+### HandoffRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `chapter_ordinal` | any |  | Hand off from a chapter rather than a proportion. |
+| `chapter_percent` | number |  | How far into that chapter, 0 to 1. |
+| `percent` | any |  | Omit to hand off from this reader's stored position. |
+| `to_edition_id` | integer (int64) | yes |  |
+
+### HandoffTarget
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `chapters` | integer | yes | How many chapters are known, which is what decides chapter alignment. |
+| `edition_id` | integer (int64) | yes |  |
+| `format` | string | yes |  |
+| `kind` | string | yes |  |
+| `percent` | number | yes | Where this reader would arrive in this edition. |
+
+### HistoryEntry
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_id` | integer (int64) | yes |  |
+| `finished_at` | string (date-time) |  |  |
+| `rating` | integer |  |  |
+| `title` | string | yes |  |
+
 ### LoginRequest
 
 | Field | Type | Required | Description |
@@ -484,6 +755,58 @@ One manifestation of a book — the EPUB, a particular narration, an abridgement
 | `device` | [`Device`](#device) | yes |  |
 | `token` | string | yes | Opaque. Shown once, stored hashed, and revocable. |
 | `user` | [`User`](#user) | yes |  |
+
+### Position
+
+One device's place in an edition.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cfi` | string |  | EPUB position. |
+| `client_seq` | integer (int64) | yes | The reporting device's own counter. |
+| `device_id` | integer (int64) | yes |  |
+| `device_name` | string | yes | So a divergence can name the device rather than a number. |
+| `edition_id` | integer (int64) | yes |  |
+| `file_index` | integer |  | Which file of a multi-file audiobook. |
+| `page` | integer |  | PDF page, or an EPUB's rendered page where one is known. |
+| `percent` | number | yes | 0 to 1, and the only field every edition kind has. |
+| `seconds` | number |  | Audiobook offset within the edition, not within the file. |
+| `this_device` | boolean | yes | Whether this is the position of the device that asked. |
+| `updated_at` | string (date-time) | yes |  |
+
+### Progress
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `diverged` | boolean | yes | Two or more devices hold positions that did not follow from one another. Both are kept; resolving them is the client's to offer, and is deliberately never done silently. |
+| `edition_id` | integer (int64) | yes |  |
+| `positions` | [`Position`](#position)[] | yes |  |
+
+### ProgressRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cfi` | any |  |  |
+| `client_seq` | integer (int64) | yes | This device's counter, incremented on every save. |
+| `file_index` | any |  |  |
+| `page` | any |  |  |
+| `percent` | number | yes |  |
+| `seconds` | any |  |  |
+
+### ReaderState
+
+One book as it stands for the reader asking. Never another profile's.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_id` | integer (int64) | yes |  |
+| `finished_at` | string (date-time) |  |  |
+| `marked` | string |  | What was set by hand, when anything was. |
+| `percent` | number |  |  |
+| `rating` | integer |  |  |
+| `reading_state` | string | yes | Derived from progress and any hand-set mark. |
+| `saved` | boolean |  |  |
+| `saved_at` | string (date-time) |  |  |
 
 ### Series
 
@@ -517,6 +840,37 @@ A book's place in a series, as carried on the book itself.
 | --- | --- | --- | --- |
 | `pin` | string |  | Required when the target profile has one. |
 | `user_id` | integer (int64) | yes |  |
+
+### SyncEdition
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_id` | integer (int64) | yes |  |
+| `edition_id` | integer (int64) | yes |  |
+| `files` | [`SyncFile`](#syncfile)[] | yes |  |
+| `format` | string | yes |  |
+| `kind` | string | yes |  |
+| `reason` | string | yes | Why this is worth holding, so a client can prioritise. |
+| `size_bytes` | integer (int64) | yes |  |
+| `title` | string | yes |  |
+
+### SyncFile
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `content_url` | string | yes |  |
+| `etag` | string | yes |  |
+| `id` | integer (int64) | yes |  |
+| `ordinal` | integer | yes |  |
+| `size_bytes` | integer (int64) | yes |  |
+
+### SyncManifest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `editions` | [`SyncEdition`](#syncedition)[] | yes |  |
+| `reasons` | string[] | yes | Every reason this server may give, in priority order. |
+| `total_bytes` | integer (int64) | yes |  |
 
 ### User
 
