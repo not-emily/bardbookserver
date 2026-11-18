@@ -41,6 +41,22 @@ tags:
     description: Browsing, searching and filtering the whole collection.
   - name: Media
     description: Cover images and the book files themselves.
+  - name: Collections
+    description: |
+      Admin-curated shelves everyone sees, and private ones a reader makes for
+      themselves. `curated` is the difference, and only an admin can set it.
+  - name: Annotations
+    description: |
+      Highlights, notes and bookmarks, synced by a client-chosen UUID so an
+      offline device can create one without asking first.
+  - name: Uploads
+    description: |
+      Adding a book from a phone, in resumable chunks. Admin-granted, and the
+      one place Bard writes media.
+  - name: Curation
+    description: |
+      Admin tools: correcting a wrong match, splitting or merging editions
+      Bard grouped by guess, and granting a restricted reader one book.
   - name: Reading
     description: |
       Where a reader is, what they have shelved and rated, and what to
@@ -870,6 +886,886 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/collections:
+    get:
+      tags: [Collections]
+      summary: List collections
+      operationId: listCollections
+      description: Curated collections, plus this reader's own.
+      responses:
+        '200':
+          description: The collections visible to this reader.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [collections]
+                properties:
+                  collections:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Collection'
+    post:
+      tags: [Collections]
+      summary: Create a collection
+      operationId: createCollection
+      description: '`curated` is admin-only; a reader creating one gets a private collection.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectionRequest'
+      responses:
+        '201':
+          description: The new collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '400':
+          description: A missing or empty name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+
+  /api/v1/collections/{id}:
+    get:
+      tags: [Collections]
+      summary: One collection and its books
+      operationId: getCollection
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: The collection and one page of its books.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BookPage'
+                  - type: object
+                    required: [collection]
+                    properties:
+                      collection:
+                        $ref: '#/components/schemas/Collection'
+        '404':
+          description: No such collection, or not this reader's to see.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Collections]
+      summary: Rename or describe a collection
+      operationId: updateCollection
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectionRequest'
+      responses:
+        '200':
+          description: The updated collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '400':
+          description: An empty name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not this reader's to change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Collections]
+      summary: Delete a collection
+      operationId: deleteCollection
+      description: Removes the shelf, never the books on it.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: integer
+                    format: int64
+        '403':
+          description: Not this reader's to delete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/collections/{id}/books/{bookID}:
+    put:
+      tags: [Collections]
+      summary: Add a book to a collection
+      operationId: addToCollection
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - $ref: '#/components/parameters/BookID'
+      responses:
+        '200':
+          description: The collection, with its count updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '403':
+          description: Not this reader's to change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such collection or book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Collections]
+      summary: Remove a book from a collection
+      operationId: removeFromCollection
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - $ref: '#/components/parameters/BookID'
+      responses:
+        '200':
+          description: The collection, with its count updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '403':
+          description: Not this reader's to change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such collection or book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/annotations:
+    get:
+      tags: [Annotations]
+      summary: Annotations in one edition
+      operationId: listAnnotations
+      parameters:
+        - name: edition_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: This reader's annotations in that edition.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [edition_id, annotations]
+                properties:
+                  edition_id:
+                    type: integer
+                    format: int64
+                  annotations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Annotation'
+        '400':
+          description: A missing or unparseable edition_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/annotations/changes:
+    get:
+      tags: [Annotations]
+      summary: What changed since a cursor
+      operationId: annotationChanges
+      description: |
+        The offline sync feed. Pass the `cursor` from the previous reply;
+        `more` says whether to ask again straight away. Deletions come back
+        as tombstones with `deleted` set, so a device that was away learns
+        about them rather than resurrecting what it still holds.
+      parameters:
+        - name: since
+          in: query
+          description: The last cursor seen. Omit or send 0 for everything.
+          schema:
+            type: integer
+            format: int64
+            default: 0
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Changes in sequence order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [annotations, cursor, more]
+                properties:
+                  annotations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Annotation'
+                  cursor:
+                    type: integer
+                    format: int64
+                    description: Send this as `since` next time.
+                  more:
+                    type: boolean
+
+  /api/v1/annotations/{uuid}:
+    put:
+      tags: [Annotations]
+      summary: Create or update an annotation
+      operationId: saveAnnotation
+      description: |
+        The UUID is chosen by the client, which is what lets an offline device
+        create an annotation and sync it later without negotiating an id.
+        Sending the same UUID again updates it.
+      parameters:
+        - $ref: '#/components/parameters/UUID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnotationRequest'
+      responses:
+        '200':
+          description: The stored annotation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Annotation'
+        '400':
+          description: A bad UUID, an unknown kind, or a malformed body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such edition, or not visible to this reader.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Annotations]
+      summary: Delete an annotation
+      operationId: deleteAnnotation
+      description: Leaves a tombstone, so other devices learn of the deletion.
+      parameters:
+        - $ref: '#/components/parameters/UUID'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: string
+        '404':
+          description: No such annotation of this reader's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/uploads:
+    post:
+      tags: [Uploads]
+      summary: Begin a resumable upload
+      operationId: createUpload
+      description: |
+        Opens a session and tells you the chunk size to use. Send `sha256` of
+        the whole file up front; finalizing verifies it.
+
+        The size limit is refused here, before any bytes are sent. An
+        abandoned session is reaped after the configured TTL, which is what
+        stops a half-sent audiobook holding the disk.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUploadRequest'
+      responses:
+        '201':
+          description: The session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        '400':
+          description: A malformed body, an unsupported format, or a size over the limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: This account may not upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: That source cannot be written to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/uploads/{id}:
+    get:
+      tags: [Uploads]
+      summary: Session state, and which chunks are still missing
+      operationId: uploadStatus
+      description: What a resuming client asks for before sending anything.
+      parameters:
+        - $ref: '#/components/parameters/UploadID'
+      responses:
+        '200':
+          description: The session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        '404':
+          description: No such session of this account's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/uploads/{id}/chunks/{offset}:
+    put:
+      tags: [Uploads]
+      summary: Send one chunk
+      operationId: uploadChunk
+      description: |
+        The body is the raw bytes. `offset` must land on a chunk boundary —
+        an arbitrary range is refused, because resume is defined in whole
+        chunks. Re-sending a chunk already held is accepted and changes
+        nothing, so a client that lost its reply can simply repeat it.
+      parameters:
+        - $ref: '#/components/parameters/UploadID'
+        - name: offset
+          in: path
+          required: true
+          description: Byte offset, which must be a multiple of `chunk_bytes`.
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {}
+      responses:
+        '200':
+          description: The session, with this chunk no longer missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        '400':
+          description: An offset off a boundary, or a chunk of the wrong length.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such session of this account's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The session is finalized or failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/uploads/{id}/finalize:
+    post:
+      tags: [Uploads]
+      summary: Assemble and ingest
+      operationId: finalizeUpload
+      description: |
+        Verifies the SHA-256 over the assembled bytes, then moves the file
+        into the source. The move is a rename within the same filesystem, so
+        a scan never sees a half-written book.
+      parameters:
+        - $ref: '#/components/parameters/UploadID'
+      responses:
+        '200':
+          description: Ingested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upload'
+        '400':
+          description: Chunks are still missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such session of this account's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The bytes do not match the declared SHA-256, or the name is taken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/books/{id}/match:
+    get:
+      tags: [Curation]
+      summary: Metadata candidates for a book
+      operationId: searchMatches
+      description: |
+        Ranked candidates from the enabled providers, **including the ones the
+        automatic matcher refused** — `would_match_automatically` says which
+        those are, because a human can recognise a match a score cannot.
+
+        `q` and `author` search for something else entirely, for when the
+        indexed metadata is too wrong to find the right book.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - name: q
+          in: query
+          description: Search for a different title instead of the indexed one.
+          schema:
+            type: string
+        - name: author
+          in: query
+          schema:
+            type: string
+        - name: edition_id
+          in: query
+          description: Which edition to match; defaults to the book's primary.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Ranked candidates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [book_id, candidates]
+                properties:
+                  book_id:
+                    type: integer
+                    format: int64
+                  edition_id:
+                    type: integer
+                    format: int64
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Candidate'
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: No metadata provider is enabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Curation]
+      summary: Apply a candidate
+      operationId: applyMatch
+      description: |
+        Pins the chosen candidate and **locks the fields it set**, so the next
+        scan cannot overwrite the correction. The lock is written to the
+        sidecar as well, which is what makes it survive rebuilding the index.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyMatchRequest'
+      responses:
+        '200':
+          description: Applied and locked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [book_id, edition_id, provider, id, locked]
+                properties:
+                  book_id:
+                    type: integer
+                    format: int64
+                  edition_id:
+                    type: integer
+                    format: int64
+                  provider:
+                    type: string
+                  id:
+                    type: string
+                  locked:
+                    type: boolean
+        '400':
+          description: A malformed body, or a candidate that no longer resolves.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such book or edition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: No metadata provider is enabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Curation]
+      summary: Unpin a match
+      operationId: clearMatch
+      description: |
+        Unpins and unlocks, **including in the sidecar** — a lock left there
+        would keep outranking the file forever.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - name: edition_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Unpinned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [edition_id, pinned]
+                properties:
+                  edition_id:
+                    type: integer
+                    format: int64
+                  pinned:
+                    type: boolean
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such book or edition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/groupings/uncertain:
+    get:
+      tags: [Curation]
+      summary: Groupings Bard is unsure about
+      operationId: listUncertainGroupings
+      description: The review queue for editions matched below the confidence threshold.
+      responses:
+        '200':
+          description: Uncertain groupings, least confident first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groupings]
+                properties:
+                  groupings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UncertainGrouping'
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+
+  /api/v1/editions/{id}/group:
+    post:
+      tags: [Curation]
+      summary: Move an edition onto another book
+      operationId: mergeEdition
+      description: A manual decision, which a rescan will not undo.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [book_id]
+              properties:
+                book_id:
+                  type: integer
+                  format: int64
+      responses:
+        '200':
+          description: Where the edition now sits.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grouping'
+        '400':
+          description: A malformed body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such edition or book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Curation]
+      summary: Split an edition onto a book of its own
+      operationId: splitEdition
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: The new book the edition was moved to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grouping'
+        '403':
+          description: Not allowed to curate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such edition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: That edition is already alone on its book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/users/{id}/overrides:
+    get:
+      tags: [Curation]
+      summary: A reader's per-book age exceptions
+      operationId: listOverrides
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '200':
+          description: Every book this reader has an exception for.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [overrides]
+                properties:
+                  overrides:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Override'
+        '403':
+          description: Not yours to see.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/users/{id}/overrides/{bookID}:
+    put:
+      tags: [Curation]
+      summary: Grant or refuse one book
+      operationId: setOverride
+      description: |
+        An exception for a single book, which outranks the age gate in both
+        directions: `allowed` true opens a book the reader's age would lock,
+        false closes one it would not.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - $ref: '#/components/parameters/BookID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowed]
+              properties:
+                allowed:
+                  type: boolean
+      responses:
+        '200':
+          description: The override.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Override'
+        '400':
+          description: A malformed body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Not yours to set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such account or book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Curation]
+      summary: Clear an exception
+      operationId: clearOverride
+      description: The book falls back to the ordinary age gate.
+      parameters:
+        - $ref: '#/components/parameters/ID'
+        - $ref: '#/components/parameters/BookID'
+      responses:
+        '200':
+          description: Cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, book_id]
+                properties:
+                  user_id:
+                    type: integer
+                    format: int64
+                  book_id:
+                    type: integer
+                    format: int64
+        '403':
+          description: Not yours to clear.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Denied'
+        '404':
+          description: No such account or book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   parameters:
     ID:
@@ -879,6 +1775,30 @@ components:
       schema:
         type: integer
         format: int64
+
+    BookID:
+      name: bookID
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+    UUID:
+      name: uuid
+      in: path
+      required: true
+      description: Chosen by the client, so an offline device can create one.
+      schema:
+        type: string
+        format: uuid
+
+    UploadID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
 
     Limit:
       name: limit
@@ -961,7 +1881,21 @@ components:
           type: string
         reason:
           type: string
-          description: A stable code; `error` is the sentence for a person.
+          description: |
+            A stable code; `error` is the sentence for a person. A reason is
+            only ever given for something the reader already knows exists —
+            hidden content is a `404` with no reason at all.
+          enum:
+            - not_admin
+            - not_owner
+            - managed_user
+            - pin_required
+            - pin_incorrect
+            - not_switchable
+            - explicitly_denied
+            - below_min_age
+            - unrated
+            - upload_not_allowed
       additionalProperties: true
 
     User:
@@ -1556,6 +2490,251 @@ components:
         chapter_href:
           type: string
           description: Where to open, for an EPUB target.
+
+    Collection:
+      type: object
+      required: [id, name, curated, book_count, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+        curated:
+          type: boolean
+          description: Admin-made and visible to everyone. Otherwise it is this reader's own.
+        book_count:
+          type: integer
+          description: Counts only books this reader may see.
+        created_at:
+          type: string
+          format: date-time
+
+    CollectionRequest:
+      type: object
+      properties:
+        name:
+          type: [string, 'null']
+        description:
+          type: [string, 'null']
+        curated:
+          type: boolean
+          description: Admin-only. Ignored otherwise.
+
+    Annotation:
+      type: object
+      required: [uuid, edition_id, kind, seq, created_at, updated_at]
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        edition_id:
+          type: integer
+          format: int64
+        kind:
+          type: string
+          enum: [highlight, note, bookmark]
+        cfi:
+          type: string
+        cfi_end:
+          type: string
+          description: The far end of a highlight.
+        page:
+          type: integer
+        seconds:
+          type: number
+        percent:
+          type: number
+        quote:
+          type: string
+          description: The text as it stood when highlighted.
+        note:
+          type: string
+        deleted:
+          type: boolean
+          description: A tombstone, so a device that was away stops holding it.
+        seq:
+          type: integer
+          format: int64
+          description: Server-assigned order, and what `since` walks.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AnnotationRequest:
+      type: object
+      required: [edition_id, kind]
+      properties:
+        edition_id:
+          type: integer
+          format: int64
+        kind:
+          type: string
+          enum: [highlight, note, bookmark]
+        cfi:
+          type: [string, 'null']
+        cfi_end:
+          type: [string, 'null']
+        page:
+          type: [integer, 'null']
+        seconds:
+          type: [number, 'null']
+        percent:
+          type: [number, 'null']
+        quote:
+          type: string
+        note:
+          type: string
+
+    CreateUploadRequest:
+      type: object
+      required: [source_id, filename, format, total_bytes, sha256]
+      properties:
+        source_id:
+          type: integer
+          format: int64
+          description: Which source directory to ingest into.
+        filename:
+          type: string
+        format:
+          type: string
+          enum: [epub, pdf, m4b, mp3]
+        total_bytes:
+          type: integer
+          format: int64
+        sha256:
+          type: string
+          description: Hex digest of the whole file, verified on finalize.
+
+    Upload:
+      type: object
+      required: [id, filename, format, total_bytes, chunk_bytes, state, missing_chunks]
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        format:
+          type: string
+        total_bytes:
+          type: integer
+          format: int64
+        chunk_bytes:
+          type: integer
+          format: int64
+          description: The size to send. Resume is defined in whole chunks of this.
+        state:
+          type: string
+          enum: [open, complete, failed]
+        missing_chunks:
+          type: array
+          description: Byte offsets still wanted. Empty means ready to finalize.
+          items:
+            type: integer
+            format: int64
+        error:
+          type: string
+          description: Why it failed, when state is failed.
+
+    Candidate:
+      type: object
+      required: [provider, id, title, score, would_match_automatically]
+      properties:
+        provider:
+          type: string
+          enum: [openlibrary, googlebooks, audnexus]
+        id:
+          type: string
+          description: Provider-local, and what to send back to apply it.
+        title:
+          type: string
+        subtitle:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        year:
+          type: integer
+        isbn:
+          type: string
+        asin:
+          type: string
+        cover_url:
+          type: string
+        score:
+          type: number
+        would_match_automatically:
+          type: boolean
+          description: |
+            False for candidates the matcher refused. They are listed anyway,
+            because a person can recognise a match a score cannot.
+
+    ApplyMatchRequest:
+      type: object
+      required: [provider, id]
+      properties:
+        provider:
+          type: string
+        id:
+          type: string
+        edition_id:
+          type: integer
+          format: int64
+        q:
+          type: string
+          description: The search that produced the candidate, for re-finding it.
+        author:
+          type: string
+
+    UncertainGrouping:
+      type: object
+      required: [book_id, book_title, edition_id, format, confidence]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+        book_title:
+          type: string
+        edition_id:
+          type: integer
+          format: int64
+        format:
+          type: string
+        confidence:
+          type: number
+          description: How sure the matcher was, below the threshold for certain.
+        reason:
+          type: string
+
+    Grouping:
+      type: object
+      required: [edition_id, book_id]
+      properties:
+        edition_id:
+          type: integer
+          format: int64
+        book_id:
+          type: integer
+          format: int64
+
+    Override:
+      type: object
+      required: [user_id, book_id, allowed]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+        book_id:
+          type: integer
+          format: int64
+        allowed:
+          type: boolean
 
     FacetValue:
       type: object

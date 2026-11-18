@@ -167,6 +167,62 @@ func TestReadingErrorsMatchTheSpec(t *testing.T) {
 		h.sendJSON("PUT", "/api/v1/books/99999/saved", h.token, nil))
 }
 
+func TestCurationResponsesMatchTheSpec(t *testing.T) {
+	spec := loadSpec(t)
+	h := newHarness(t)
+	lib := h.seedLibrary()
+
+	assertMatches(t, spec, "POST", "/api/v1/collections",
+		h.sendJSON("POST", "/api/v1/collections", h.token,
+			map[string]any{"name": "Winter", "description": "Cold books"}))
+	assertMatches(t, spec, "GET", "/api/v1/collections", h.get("/api/v1/collections"))
+	assertMatches(t, spec, "GET", "/api/v1/collections/{id}", h.get("/api/v1/collections/1"))
+
+	inCollection := fmt.Sprintf("/api/v1/collections/1/books/%d", lib.dune)
+	assertMatches(t, spec, "PUT", "/api/v1/collections/{id}/books/{bookID}",
+		h.sendJSON("PUT", inCollection, h.token, nil))
+	assertMatches(t, spec, "DELETE", "/api/v1/collections/{id}/books/{bookID}",
+		h.sendJSON("DELETE", inCollection, h.token, nil))
+	assertMatches(t, spec, "PATCH", "/api/v1/collections/{id}",
+		h.sendJSON("PATCH", "/api/v1/collections/1", h.token, map[string]any{"name": "Winter Reading"}))
+	assertMatches(t, spec, "DELETE", "/api/v1/collections/{id}",
+		h.sendJSON("DELETE", "/api/v1/collections/1", h.token, nil))
+
+	const uuid = "11111111-1111-4111-8111-111111111111"
+	assertMatches(t, spec, "PUT", "/api/v1/annotations/{uuid}",
+		h.sendJSON("PUT", "/api/v1/annotations/"+uuid, h.token, map[string]any{
+			"edition_id": lib.duneEPUB, "kind": "highlight",
+			"cfi": "epubcfi(/6/14!/4/2/2/1:0)", "percent": 0.42, "quote": "A beginning",
+		}))
+	assertMatches(t, spec, "GET", "/api/v1/annotations",
+		h.get(fmt.Sprintf("/api/v1/annotations?edition_id=%d", lib.duneEPUB)))
+	assertMatches(t, spec, "GET", "/api/v1/annotations/changes",
+		h.get("/api/v1/annotations/changes?since=0"))
+	assertMatches(t, spec, "DELETE", "/api/v1/annotations/{uuid}",
+		h.sendJSON("DELETE", "/api/v1/annotations/"+uuid, h.token, nil))
+
+	assertMatches(t, spec, "GET", "/api/v1/groupings/uncertain", h.get("/api/v1/groupings/uncertain"))
+	assertMatches(t, spec, "GET", "/api/v1/users/{id}/overrides", h.get("/api/v1/users/1/overrides"))
+
+	override := fmt.Sprintf("/api/v1/users/1/overrides/%d", lib.dune)
+	assertMatches(t, spec, "PUT", "/api/v1/users/{id}/overrides/{bookID}",
+		h.sendJSON("PUT", override, h.token, map[string]any{"allowed": true}))
+	assertMatches(t, spec, "DELETE", "/api/v1/users/{id}/overrides/{bookID}",
+		h.sendJSON("DELETE", override, h.token, nil))
+
+	// Both refuse before doing anything when nothing is configured, and that
+	// refusal is as much a documented shape as a success.
+	assertMatches(t, spec, "GET", "/api/v1/books/{id}/match",
+		h.get(fmt.Sprintf("/api/v1/books/%d/match", lib.dune)))
+	assertMatches(t, spec, "POST", "/api/v1/uploads",
+		h.sendJSON("POST", "/api/v1/uploads", h.token, map[string]any{
+			"source_id": lib.enabledSource, "filename": "Probe.epub", "format": "epub",
+			"total_bytes": 1024,
+			"sha256":      "0000000000000000000000000000000000000000000000000000000000000000",
+		}))
+	assertMatches(t, spec, "GET", "/api/v1/uploads/{id}", h.get("/api/v1/uploads/nope"))
+}
+
 // The error shapes are as much a promise as the success ones, and are what a
 // client branches on.
 func TestDocumentedErrorsMatchTheSpec(t *testing.T) {

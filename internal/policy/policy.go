@@ -16,7 +16,10 @@
 // callers name the action they are authorizing.
 package policy
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 type Reason string
 
@@ -49,6 +52,10 @@ var allReasons = []Reason{
 	ReasonUnrated,
 	ReasonUploadNotAllowed,
 }
+
+// AllReasons is the published set: every code a client can be given, which
+// the API reference has to list for one to be worth branching on.
+func AllReasons() []Reason { return slices.Clone(allReasons) }
 
 const defaultMessage = "Not authorized"
 

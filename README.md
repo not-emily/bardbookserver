@@ -19,6 +19,11 @@ something to read a book on tonight, this is not yet it.
 What does work, completely: scanning, metadata, grouping, accounts, age gating,
 remote access, uploads, and the API that a client will use.
 
+**Building one?** [`docs/api.md`](docs/api.md) is the reference, generated from
+[`docs/api/openapi.yaml`](docs/api/openapi.yaml). Every endpoint's responses are
+checked against that spec by the test suite, so it describes the server rather
+than an intention.
+
 ## What it handles
 
 | Format | Notes |

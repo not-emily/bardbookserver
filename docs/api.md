@@ -29,6 +29,10 @@ a reason — a reason code would confirm the book exists.
 
 ## Endpoints
 
+- [`GET /api/v1/annotations`](#get-apiv1annotations) — Annotations in one edition
+- [`GET /api/v1/annotations/changes`](#get-apiv1annotationschanges) — What changed since a cursor
+- [`DELETE /api/v1/annotations/{uuid}`](#delete-apiv1annotationsuuid) — Delete an annotation
+- [`PUT /api/v1/annotations/{uuid}`](#put-apiv1annotationsuuid) — Create or update an annotation
 - [`POST /api/v1/auth/login`](#post-apiv1authlogin) — Exchange credentials for a device token
 - [`POST /api/v1/auth/logout`](#post-apiv1authlogout) — Revoke this device
 - [`GET /api/v1/auth/me`](#get-apiv1authme) — The current profile, device, and who else this device may become
@@ -37,24 +41,120 @@ a reason — a reason code would confirm the book exists.
 - [`GET /api/v1/books/{id}`](#get-apiv1booksid) — One book, with its editions and files
 - [`GET /api/v1/books/{id}/cover`](#get-apiv1booksidcover) — Cover image
 - [`GET /api/v1/books/{id}/handoff`](#get-apiv1booksidhandoff) — Where you would land in each other edition
+- [`DELETE /api/v1/books/{id}/match`](#delete-apiv1booksidmatch) — Unpin a match
+- [`GET /api/v1/books/{id}/match`](#get-apiv1booksidmatch) — Metadata candidates for a book
+- [`POST /api/v1/books/{id}/match`](#post-apiv1booksidmatch) — Apply a candidate
 - [`DELETE /api/v1/books/{id}/rating`](#delete-apiv1booksidrating) — Clear a rating
 - [`PUT /api/v1/books/{id}/rating`](#put-apiv1booksidrating) — Rate a book
 - [`DELETE /api/v1/books/{id}/saved`](#delete-apiv1booksidsaved) — Remove from the saved shelf
 - [`PUT /api/v1/books/{id}/saved`](#put-apiv1booksidsaved) — Add to the saved shelf
 - [`PUT /api/v1/books/{id}/state`](#put-apiv1booksidstate) — Mark finished or abandoned
+- [`GET /api/v1/collections`](#get-apiv1collections) — List collections
+- [`POST /api/v1/collections`](#post-apiv1collections) — Create a collection
+- [`DELETE /api/v1/collections/{id}`](#delete-apiv1collectionsid) — Delete a collection
+- [`GET /api/v1/collections/{id}`](#get-apiv1collectionsid) — One collection and its books
+- [`PATCH /api/v1/collections/{id}`](#patch-apiv1collectionsid) — Rename or describe a collection
+- [`DELETE /api/v1/collections/{id}/books/{bookID}`](#delete-apiv1collectionsidbooksbookid) — Remove a book from a collection
+- [`PUT /api/v1/collections/{id}/books/{bookID}`](#put-apiv1collectionsidbooksbookid) — Add a book to a collection
 - [`GET /api/v1/devices`](#get-apiv1devices) — List authorized devices
 - [`DELETE /api/v1/devices/{id}`](#delete-apiv1devicesid) — Revoke a device
+- [`DELETE /api/v1/editions/{id}/group`](#delete-apiv1editionsidgroup) — Split an edition onto a book of its own
+- [`POST /api/v1/editions/{id}/group`](#post-apiv1editionsidgroup) — Move an edition onto another book
 - [`POST /api/v1/editions/{id}/handoff`](#post-apiv1editionsidhandoff) — Carry a position into another edition
 - [`GET /api/v1/editions/{id}/progress`](#get-apiv1editionsidprogress) — Where every device is in this edition
 - [`PUT /api/v1/editions/{id}/progress`](#put-apiv1editionsidprogress) — Report this device's position
 - [`GET /api/v1/facets`](#get-apiv1facets) — Every facet and its values
 - [`GET /api/v1/facets/{name}`](#get-apiv1facetsname) — One facet's values
 - [`GET /api/v1/files/{id}/content`](#get-apiv1filesidcontent) — Stream or download a book file
+- [`GET /api/v1/groupings/uncertain`](#get-apiv1groupingsuncertain) — Groupings Bard is unsure about
 - [`GET /api/v1/history`](#get-apiv1history) — Books this reader has finished
 - [`GET /api/v1/search`](#get-apiv1search) — Search the library
 - [`GET /api/v1/series`](#get-apiv1series) — List series
 - [`GET /api/v1/series/{id}`](#get-apiv1seriesid) — One series and its books
 - [`GET /api/v1/sync`](#get-apiv1sync) — What this reader would want held offline
+- [`POST /api/v1/uploads`](#post-apiv1uploads) — Begin a resumable upload
+- [`GET /api/v1/uploads/{id}`](#get-apiv1uploadsid) — Session state, and which chunks are still missing
+- [`PUT /api/v1/uploads/{id}/chunks/{offset}`](#put-apiv1uploadsidchunksoffset) — Send one chunk
+- [`POST /api/v1/uploads/{id}/finalize`](#post-apiv1uploadsidfinalize) — Assemble and ingest
+- [`GET /api/v1/users/{id}/overrides`](#get-apiv1usersidoverrides) — A reader's per-book age exceptions
+- [`DELETE /api/v1/users/{id}/overrides/{bookID}`](#delete-apiv1usersidoverridesbookid) — Clear an exception
+- [`PUT /api/v1/users/{id}/overrides/{bookID}`](#put-apiv1usersidoverridesbookid) — Grant or refuse one book
+
+## `GET /api/v1/annotations`
+
+**Annotations in one edition**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `edition_id` | query | yes |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | This reader's annotations in that edition. |
+| `400` | [`Error`](#error) | A missing or unparseable edition_id. |
+
+## `GET /api/v1/annotations/changes`
+
+**What changed since a cursor**
+
+The offline sync feed. Pass the `cursor` from the previous reply;
+`more` says whether to ask again straight away. Deletions come back
+as tombstones with `deleted` set, so a device that was away learns
+about them rather than resurrecting what it still holds.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `since` | query |  | The last cursor seen. Omit or send 0 for everything. |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Changes in sequence order. |
+
+## `DELETE /api/v1/annotations/{uuid}`
+
+**Delete an annotation**
+
+Leaves a tombstone, so other devices learn of the deletion.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Deleted. |
+| `404` | [`Error`](#error) | No such annotation of this reader's. |
+
+## `PUT /api/v1/annotations/{uuid}`
+
+**Create or update an annotation**
+
+The UUID is chosen by the client, which is what lets an offline device
+create an annotation and sync it later without negotiating an id.
+Sending the same UUID again updates it.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+[`AnnotationRequest`](#annotationrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Annotation`](#annotation) | The stored annotation. |
+| `400` | [`Error`](#error) | A bad UUID, an unknown kind, or a malformed body. |
+| `404` | [`Error`](#error) | No such edition, or not visible to this reader. |
 
 ## `POST /api/v1/auth/login`
 
@@ -228,6 +328,79 @@ before committing to it.
 | `200` | — | Each edition and the position it would open at. |
 | `404` | [`Error`](#error) | No such book, or not visible to this reader. |
 
+## `DELETE /api/v1/books/{id}/match`
+
+**Unpin a match**
+
+Unpins and unlocks, **including in the sidecar** — a lock left there
+would keep outranking the file forever.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `edition_id` | query |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Unpinned. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+| `404` | [`Error`](#error) | No such book or edition. |
+
+## `GET /api/v1/books/{id}/match`
+
+**Metadata candidates for a book**
+
+Ranked candidates from the enabled providers, **including the ones the
+automatic matcher refused** — `would_match_automatically` says which
+those are, because a human can recognise a match a score cannot.
+
+`q` and `author` search for something else entirely, for when the
+indexed metadata is too wrong to find the right book.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `q` | query |  | Search for a different title instead of the indexed one. |
+| `author` | query |  |  |
+| `edition_id` | query |  | Which edition to match; defaults to the book's primary. |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Ranked candidates. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+| `404` | [`Error`](#error) | No such book. |
+| `409` | [`Error`](#error) | No metadata provider is enabled. |
+
+## `POST /api/v1/books/{id}/match`
+
+**Apply a candidate**
+
+Pins the chosen candidate and **locks the fields it set**, so the next
+scan cannot overwrite the correction. The lock is written to the
+sidecar as well, which is what makes it survive rebuilding the index.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+[`ApplyMatchRequest`](#applymatchrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Applied and locked. |
+| `400` | [`Error`](#error) | A malformed body, or a candidate that no longer resolves. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+| `404` | [`Error`](#error) | No such book or edition. |
+| `409` | [`Error`](#error) | No metadata provider is enabled. |
+
 ## `DELETE /api/v1/books/{id}/rating`
 
 **Clear a rating**
@@ -316,6 +489,126 @@ always what was marked.
 | `400` | [`Error`](#error) | A state other than finished, abandoned or null. |
 | `404` | [`Error`](#error) | No such book, or not visible to this reader. |
 
+## `GET /api/v1/collections`
+
+**List collections**
+
+Curated collections, plus this reader's own.
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The collections visible to this reader. |
+
+## `POST /api/v1/collections`
+
+**Create a collection**
+
+`curated` is admin-only; a reader creating one gets a private collection.
+
+### Request body
+
+[`CollectionRequest`](#collectionrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `201` | [`Collection`](#collection) | The new collection. |
+| `400` | [`Error`](#error) | A missing or empty name. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+
+## `DELETE /api/v1/collections/{id}`
+
+**Delete a collection**
+
+Removes the shelf, never the books on it.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Deleted. |
+| `403` | [`Denied`](#denied) | Not this reader's to delete. |
+| `404` | [`Error`](#error) | No such collection. |
+
+## `GET /api/v1/collections/{id}`
+
+**One collection and its books**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | The collection and one page of its books. |
+| `404` | [`Error`](#error) | No such collection, or not this reader's to see. |
+
+## `PATCH /api/v1/collections/{id}`
+
+**Rename or describe a collection**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+[`CollectionRequest`](#collectionrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Collection`](#collection) | The updated collection. |
+| `400` | [`Error`](#error) | An empty name. |
+| `403` | [`Denied`](#denied) | Not this reader's to change. |
+| `404` | [`Error`](#error) | No such collection. |
+
+## `DELETE /api/v1/collections/{id}/books/{bookID}`
+
+**Remove a book from a collection**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Collection`](#collection) | The collection, with its count updated. |
+| `403` | [`Denied`](#denied) | Not this reader's to change. |
+| `404` | [`Error`](#error) | No such collection or book. |
+
+## `PUT /api/v1/collections/{id}/books/{bookID}`
+
+**Add a book to a collection**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Collection`](#collection) | The collection, with its count updated. |
+| `403` | [`Denied`](#denied) | Not this reader's to change. |
+| `404` | [`Error`](#error) | No such collection or book. |
+
 ## `GET /api/v1/devices`
 
 **List authorized devices**
@@ -343,6 +636,44 @@ Takes effect on that device's next request. Revoking your own logs you out.
 | `204` | — | Revoked. |
 | `403` | [`Denied`](#denied) | Not your device to revoke. |
 | `404` | [`Error`](#error) | No such device. |
+
+## `DELETE /api/v1/editions/{id}/group`
+
+**Split an edition onto a book of its own**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Grouping`](#grouping) | The new book the edition was moved to. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+| `404` | [`Error`](#error) | No such edition. |
+| `409` | [`Error`](#error) | That edition is already alone on its book. |
+
+## `POST /api/v1/editions/{id}/group`
+
+**Move an edition onto another book**
+
+A manual decision, which a rescan will not undo.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Request body
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Grouping`](#grouping) | Where the edition now sits. |
+| `400` | [`Error`](#error) | A malformed body. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+| `404` | [`Error`](#error) | No such edition or book. |
 
 ## `POST /api/v1/editions/{id}/handoff`
 
@@ -483,6 +814,19 @@ a resumed download cannot splice two different files together.
 | `404` | [`Error`](#error) | No such file, or not visible to this reader. |
 | `416` | — | The range lies outside the file. |
 
+## `GET /api/v1/groupings/uncertain`
+
+**Groupings Bard is unsure about**
+
+The review queue for editions matched below the confidence threshold.
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Uncertain groupings, least confident first. |
+| `403` | [`Denied`](#denied) | Not allowed to curate. |
+
 ## `GET /api/v1/history`
 
 **Books this reader has finished**
@@ -569,7 +913,197 @@ downloading.
 | --- | --- | --- |
 | `200` | [`SyncManifest`](#syncmanifest) | Editions worth pre-caching. |
 
+## `POST /api/v1/uploads`
+
+**Begin a resumable upload**
+
+Opens a session and tells you the chunk size to use. Send `sha256` of
+the whole file up front; finalizing verifies it.
+
+The size limit is refused here, before any bytes are sent. An
+abandoned session is reaped after the configured TTL, which is what
+stops a half-sent audiobook holding the disk.
+
+### Request body
+
+[`CreateUploadRequest`](#createuploadrequest), required
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `201` | [`Upload`](#upload) | The session. |
+| `400` | [`Error`](#error) | A malformed body, an unsupported format, or a size over the limit. |
+| `403` | [`Denied`](#denied) | This account may not upload. |
+| `404` | [`Error`](#error) | No such source. |
+| `409` | [`Error`](#error) | That source cannot be written to. |
+
+## `GET /api/v1/uploads/{id}`
+
+**Session state, and which chunks are still missing**
+
+What a resuming client asks for before sending anything.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Upload`](#upload) | The session. |
+| `404` | [`Error`](#error) | No such session of this account's. |
+
+## `PUT /api/v1/uploads/{id}/chunks/{offset}`
+
+**Send one chunk**
+
+The body is the raw bytes. `offset` must land on a chunk boundary —
+an arbitrary range is refused, because resume is defined in whole
+chunks. Re-sending a chunk already held is accepted and changes
+nothing, so a client that lost its reply can simply repeat it.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `offset` | path | yes | Byte offset, which must be a multiple of `chunk_bytes`. |
+
+### Request body
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Upload`](#upload) | The session, with this chunk no longer missing. |
+| `400` | [`Error`](#error) | An offset off a boundary, or a chunk of the wrong length. |
+| `404` | [`Error`](#error) | No such session of this account's. |
+| `409` | [`Error`](#error) | The session is finalized or failed. |
+
+## `POST /api/v1/uploads/{id}/finalize`
+
+**Assemble and ingest**
+
+Verifies the SHA-256 over the assembled bytes, then moves the file
+into the source. The move is a rename within the same filesystem, so
+a scan never sees a half-written book.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Upload`](#upload) | Ingested. |
+| `400` | [`Error`](#error) | Chunks are still missing. |
+| `404` | [`Error`](#error) | No such session of this account's. |
+| `409` | [`Error`](#error) | The bytes do not match the declared SHA-256, or the name is taken. |
+
+## `GET /api/v1/users/{id}/overrides`
+
+**A reader's per-book age exceptions**
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Every book this reader has an exception for. |
+| `403` | [`Denied`](#denied) | Not yours to see. |
+| `404` | [`Error`](#error) | No such account. |
+
+## `DELETE /api/v1/users/{id}/overrides/{bookID}`
+
+**Clear an exception**
+
+The book falls back to the ordinary age gate.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | — | Cleared. |
+| `403` | [`Denied`](#denied) | Not yours to clear. |
+| `404` | [`Error`](#error) | No such account or book. |
+
+## `PUT /api/v1/users/{id}/overrides/{bookID}`
+
+**Grant or refuse one book**
+
+An exception for a single book, which outranks the age gate in both
+directions: `allowed` true opens a book the reader's age would lock,
+false closes one it would not.
+
+| Parameter | In | Required | Description |
+| --- | --- | --- | --- |
+| `` |  |  |  |
+| `` |  |  |  |
+
+### Request body
+
+### Responses
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | [`Override`](#override) | The override. |
+| `400` | [`Error`](#error) | A malformed body. |
+| `403` | [`Denied`](#denied) | Not yours to set. |
+| `404` | [`Error`](#error) | No such account or book. |
+
 ## Schemas
+
+### Annotation
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cfi` | string |  |  |
+| `cfi_end` | string |  | The far end of a highlight. |
+| `created_at` | string (date-time) | yes |  |
+| `deleted` | boolean |  | A tombstone, so a device that was away stops holding it. |
+| `edition_id` | integer (int64) | yes |  |
+| `kind` | string | yes |  |
+| `note` | string |  |  |
+| `page` | integer |  |  |
+| `percent` | number |  |  |
+| `quote` | string |  | The text as it stood when highlighted. |
+| `seconds` | number |  |  |
+| `seq` | integer (int64) | yes | Server-assigned order, and what `since` walks. |
+| `updated_at` | string (date-time) | yes |  |
+| `uuid` | string (uuid) | yes |  |
+
+### AnnotationRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cfi` | any |  |  |
+| `cfi_end` | any |  |  |
+| `edition_id` | integer (int64) | yes |  |
+| `kind` | string | yes |  |
+| `note` | string |  |  |
+| `page` | any |  |  |
+| `percent` | any |  |  |
+| `quote` | string |  |  |
+| `seconds` | any |  |  |
+
+### ApplyMatchRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `author` | string |  |  |
+| `edition_id` | integer (int64) |  |  |
+| `id` | string | yes |  |
+| `provider` | string | yes |  |
+| `q` | string |  | The search that produced the candidate, for re-finding it. |
 
 ### Book
 
@@ -614,6 +1148,22 @@ never another profile's.
 | `offset` | integer | yes |  |
 | `total` | integer | yes | Matches before paging, counting only what this reader may see. |
 
+### Candidate
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `asin` | string |  |  |
+| `authors` | string[] |  |  |
+| `cover_url` | string |  |  |
+| `id` | string | yes | Provider-local, and what to send back to apply it. |
+| `isbn` | string |  |  |
+| `provider` | string | yes |  |
+| `score` | number | yes |  |
+| `subtitle` | string |  |  |
+| `title` | string | yes |  |
+| `would_match_automatically` | boolean | yes | False for candidates the matcher refused. They are listed anyway, because a person can recognise a match a score cannot. |
+| `year` | integer |  |  |
+
 ### Chapter
 
 | Field | Type | Required | Description |
@@ -622,6 +1172,35 @@ never another profile's.
 | `ordinal` | integer | yes |  |
 | `start_seconds` | number |  | Audiobook chapters. Offset within the edition, not the file. |
 | `title` | string |  |  |
+
+### Collection
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_count` | integer | yes | Counts only books this reader may see. |
+| `created_at` | string (date-time) | yes |  |
+| `curated` | boolean | yes | Admin-made and visible to everyone. Otherwise it is this reader's own. |
+| `description` | string |  |  |
+| `id` | integer (int64) | yes |  |
+| `name` | string | yes |  |
+
+### CollectionRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `curated` | boolean |  | Admin-only. Ignored otherwise. |
+| `description` | any |  |  |
+| `name` | any |  |  |
+
+### CreateUploadRequest
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `format` | string | yes |  |
+| `sha256` | string | yes | Hex digest of the whole file, verified on finalize. |
+| `source_id` | integer (int64) | yes | Which source directory to ingest into. |
+| `total_bytes` | integer (int64) | yes |  |
 
 ### Denied
 
@@ -632,7 +1211,7 @@ whatever that reason needs, such as the age a book requires.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `error` | string | yes |  |
-| `reason` | string | yes | A stable code; `error` is the sentence for a person. |
+| `reason` | string | yes | A stable code; `error` is the sentence for a person. A reason is only ever given for something the reader already knows exists — hidden content is a `404` with no reason at all. |
 
 ### Device
 
@@ -699,6 +1278,13 @@ One manifestation of a book — the EPUB, a particular narration, an abridgement
 | `name` | string | yes |  |
 | `slug` | string | yes | What the `genre` facet filters on. |
 
+### Grouping
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_id` | integer (int64) | yes |  |
+| `edition_id` | integer (int64) | yes |  |
+
 ### Handoff
 
 | Field | Type | Required | Description |
@@ -755,6 +1341,14 @@ One manifestation of a book — the EPUB, a particular narration, an abridgement
 | `device` | [`Device`](#device) | yes |  |
 | `token` | string | yes | Opaque. Shown once, stored hashed, and revocable. |
 | `user` | [`User`](#user) | yes |  |
+
+### Override
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `allowed` | boolean | yes |  |
+| `book_id` | integer (int64) | yes |  |
+| `user_id` | integer (int64) | yes |  |
 
 ### Position
 
@@ -870,6 +1464,30 @@ A book's place in a series, as carried on the book itself.
 | --- | --- | --- | --- |
 | `editions` | [`SyncEdition`](#syncedition)[] | yes |  |
 | `reasons` | string[] | yes | Every reason this server may give, in priority order. |
+| `total_bytes` | integer (int64) | yes |  |
+
+### UncertainGrouping
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `book_id` | integer (int64) | yes |  |
+| `book_title` | string | yes |  |
+| `confidence` | number | yes | How sure the matcher was, below the threshold for certain. |
+| `edition_id` | integer (int64) | yes |  |
+| `format` | string | yes |  |
+| `reason` | string |  |  |
+
+### Upload
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `chunk_bytes` | integer (int64) | yes | The size to send. Resume is defined in whole chunks of this. |
+| `error` | string |  | Why it failed, when state is failed. |
+| `filename` | string | yes |  |
+| `format` | string | yes |  |
+| `id` | string | yes |  |
+| `missing_chunks` | integer (int64)[] | yes | Byte offsets still wanted. Empty means ready to finalize. |
+| `state` | string | yes |  |
 | `total_bytes` | integer (int64) | yes |  |
 
 ### User
